@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install flask waitress pytest
+      - run: python -m pytest -q
+      - name: Zip bouwen
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix=slingbag/ -o dist/slingbag.zip HEAD
+          cp install.sh dist/install.sh
+      - name: Release maken
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(python -c "import slingbag; print(slingbag.__version__)")
+          TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" dist/slingbag.zip dist/install.sh \
+            --target "$GITHUB_SHA" \
+            --title "Slingbag ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
+            --generate-notes --latest

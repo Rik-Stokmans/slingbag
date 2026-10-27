@@ -1,0 +1,5 @@
+# Alleen voor ontwikkelen op de Mac; op de Pi komen de pakketten uit apt (zie deploy/install-pi.sh).
+flask>=2.2
+waitress>=2.1
+pytest>=7
+piper-tts>=1.3

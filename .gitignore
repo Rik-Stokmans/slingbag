@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Spraakmodellen en Piper: te groot voor git, deploy/download-vendor.sh haalt ze op
+vendor/*
+!vendor/SHA256SUMS
+
+# Build en systeem
+dist/
+.DS_Store

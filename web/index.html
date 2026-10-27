@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f5d50">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Slingbag">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+  <title>Slingbag</title>
+</head>
+<body>
+  <header class="top">
+    <h1>Slingbag</h1>
+    <span id="verbinding" class="pill">verbinden…</span>
+  </header>
+
+  <main>
+    <!-- Nu: status, handmatig starten en testknoppen -->
+    <section id="tab-nu" class="tab active">
+      <div class="card status-card">
+        <div class="status-row">
+          <span id="lamp" class="lamp" title="statuslampje"></span>
+          <div>
+            <div id="toestand" class="state">—</div>
+            <div id="toestand-detail" class="muted"></div>
+          </div>
+        </div>
+        <div id="fout" class="alert hidden"></div>
+        <div id="waarschuwingen"></div>
+        <dl class="facts">
+          <dt>Volgende uitnodiging</dt><dd id="volgende">—</dd>
+          <dt>Uitgesteld tot</dt><dd id="uitstel">—</dd>
+          <dt>Klok slingbag</dt><dd id="klok">—</dd>
+          <dt>Spraak</dt><dd id="voorbereiding">—</dd>
+        </dl>
+      </div>
+
+      <div class="card">
+        <h2>Nu uitnodigen</h2>
+        <div class="row">
+          <select id="start-activiteit" aria-label="Activiteit"></select>
+          <button id="start" class="primary">Uitnodigen</button>
+        </div>
+        <button id="stop" class="danger wide">Stop sessie</button>
+      </div>
+
+      <div class="card">
+        <h2>Testknoppen</h2>
+        <p class="muted">Werken hetzelfde als de knoppen op de slingbag.</p>
+        <div class="testpad">
+          <button class="pad groen" data-knop="groen">Ja<br><small>volgende</small></button>
+          <button class="pad geel" data-knop="geel">Later<br><small>herhaal</small></button>
+          <button class="pad blauw" data-knop="blauw">Hulp<br><small>pauze</small></button>
+          <button class="pad rood" data-knop="rood">Nee<br><small>stop</small></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Activiteiten en stappen -->
+    <section id="tab-activiteiten" class="tab">
+      <div id="activiteiten"></div>
+      <button id="nieuwe-activiteit" class="wide">+ Activiteit toevoegen</button>
+    </section>
+
+    <!-- Planning -->
+    <section id="tab-planning" class="tab">
+      <p class="muted">Op deze momenten nodigt de slingbag uit. Loopt er al een sessie, dan wordt het moment overgeslagen.</p>
+      <div id="planning"></div>
+      <button id="nieuw-moment" class="wide">+ Moment toevoegen</button>
+    </section>
+
+    <!-- Instellingen -->
+    <section id="tab-instellingen" class="tab">
+      <div class="card">
+        <h2>Geluid en stem</h2>
+        <label>Volume <output id="volume-waarde"></output>
+          <input id="volume" type="range" min="0" max="100" step="5">
+        </label>
+        <label>Stem
+          <select id="stem"></select>
+        </label>
+        <button id="stem-test">Laat horen op de slingbag</button>
+        <label class="switch"><input id="aandachtsgeluid" type="checkbox"> Zacht geluidje vóór een uitnodiging</label>
+        <label class="switch"><input id="knopuitleg" type="checkbox"> Knoppen uitleggen bij uitnodiging en eerste stap</label>
+      </div>
+      <div class="card">
+        <h2>Wachttijden</h2>
+        <label>Wachten op antwoord (seconden)<input id="t-antwoord" type="number" min="10" max="600"></label>
+        <label>Later vragen na (minuten)<input id="t-uitstel" type="number" min="1" max="240"></label>
+        <label>Pauze stopt na (minuten)<input id="t-pauze" type="number" min="1" max="240"></label>
+        <label>Sessie stopt zonder knopdruk na (minuten)<input id="t-sessie" type="number" min="5" max="480"></label>
+      </div>
+      <details class="card">
+        <summary><h2>Vaste zinnen aanpassen</h2></summary>
+        <p class="muted">Leeg laten = standaardzin. {activiteit} en {minuten} worden ingevuld.</p>
+        <div id="teksten"></div>
+      </details>
+      <div class="card">
+        <h2>Slingbag</h2>
+        <p class="muted">Zet de slingbag altijd zo uit voordat je de stroom loskoppelt. Op de slingbag zelf: groen en rood samen 5 seconden vasthouden.</p>
+        <button id="afsluiten" class="danger wide">Slingbag uitzetten</button>
+        <p id="versie" class="muted small"></p>
+      </div>
+    </section>
+
+    <!-- Logboek -->
+    <section id="tab-logboek" class="tab">
+      <div class="row">
+        <a class="button" href="/api/logboek.csv" download>Download CSV</a>
+        <button id="logboek-wissen" class="danger">Wissen</button>
+      </div>
+      <div class="table-wrap"><table id="logboek"></table></div>
+    </section>
+  </main>
+
+  <div id="opslaan-balk" class="savebar hidden">
+    <span>Niet opgeslagen wijzigingen</span>
+    <button id="annuleren">Annuleren</button>
+    <button id="opslaan" class="primary">Opslaan</button>
+  </div>
+  <div id="melding" class="toast hidden" role="status"></div>
+
+  <nav class="tabs">
+    <button data-tab="nu" class="active">Nu</button>
+    <button data-tab="activiteiten">Activiteiten</button>
+    <button data-tab="planning">Planning</button>
+    <button data-tab="instellingen">Instellingen</button>
+    <button data-tab="logboek">Logboek</button>
+  </nav>
+
+  <template id="tpl-item">
+    <div class="item">
+      <textarea rows="2"></textarea>
+      <div class="item-tools">
+        <button class="small play" title="Laat horen op de slingbag">▶ Speel</button>
+        <label class="button small upload">🎙 Opname<input type="file" accept="audio/*" hidden></label>
+        <span class="rec hidden"><audio controls preload="none"></audio><button class="small rec-del" title="Opname verwijderen">✕</button></span>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

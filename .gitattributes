@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+
+# Niet in de release-zip
+.github/ export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore
