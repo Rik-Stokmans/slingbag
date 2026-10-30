@@ -5,7 +5,8 @@ Accolades worden ingevuld met ``str.format``: {activiteit} en {minuten}.
 """
 
 DEFAULT_TEXTS = {
-    "knoppen_uitnodiging": "Druk op groen om te beginnen. Geel is later. Rood is nee.",
+    "knoppen_uitnodiging": "Druk op groen om te beginnen. Geel is later. "
+                           "Blauw is beginnen met hulp. Rood is nee.",
     "keuze_hulp": "Wil je het zelf doen, of wil je hulp bij de stappen? "
                   "Groen is zelf doen. Blauw is hulp.",
     "zelfstandig": "Fijn. Wil je toch hulp, druk dan op blauw. "
@@ -15,7 +16,8 @@ DEFAULT_TEXTS = {
     "pauze": "We pauzeren even. Druk op blauw als je verder wilt.",
     "hervat": "We gaan verder.",
     "laatste_stap": "Dat was de laatste stap.",
-    "afronden_vraag": "Ben je klaar met {activiteit}? Groen is ja. Geel is nog niet.",
+    "afronden_vraag": "Ben je klaar met {activiteit}? Groen is ja. "
+                      "Blauw is nog niet, dan help ik je verder.",
     "uitstel": "Goed, ik vraag het over {minuten} minuten nog een keer.",
     "weigering": "Dat is goed. Dan doen we het een andere keer.",
     "stop": "Ik stop. Tot later.",
