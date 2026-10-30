@@ -22,7 +22,7 @@ Hetzelfde commando werkt de software later bij naar de nieuwste release.
 
 ## Mappen en C4-componenten
 
-| Pad | C4-element | Requirements |
+| Pad | C4-component | Requirements |
 | --- | --- | --- |
 | `slingbag/service.py` | Slingbag-service: gebeurtenislus die alles verbindt | TR-01, TR-05 |
 | `slingbag/interaction.py` | Interactiecontroller (toestandsmachine) | FR-02–FR-06, FR-09, TR-05 |
@@ -118,23 +118,37 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 
 In de simulatie komen knopdrukken uit het testpaneel van de app en speelt de computer het geluid af (macOS: `afplay`). Voor spraak in de simulatie haal je eerst de stemmen op met `./deploy/download-vendor.sh`.
 
-## Branches en releases
+## Branches, versies en releases
 
-| Branch | Doel | Regels |
-| --- | --- | --- |
-| `testing` | Ontwikkelen en testen | Direct committen mag; elke push draait de tests. |
-| `main` | Vrijgegeven versie | Alleen via een pull request vanuit `testing`; de checks `tests` en `bronbranch` moeten slagen. |
+| Branch | Doel | Regels | Release |
+| --- | --- | --- | --- |
+| `testing` | Ontwikkelen en testen | Direct committen mag. | Elke push: tests, daarna pre-release `v<versie>-beta.<n>` |
+| `main` | Vrijgegeven versie | Alleen via een pull request vanuit `testing`; de checks `tests`, `bronbranch` en `versie` moeten slagen. | Elke merge: tests, daarna release `v<versie>` als *latest* |
 
-Elke merge naar `main` maakt automatisch een nieuwe [release](https://github.com/Rik-Stokmans/slingbag/releases) met `slingbag.zip` en `install.sh`. Het versienummer staat in `slingbag/__init__.py`; het buildnummer loopt automatisch op.
+Versienummers volgen [Semantic Versioning](https://semver.org/lang/nl/): `MAJOR.MINOR.PATCH` in `slingbag/__init__.py`.
+
+- **PATCH** (0.2.0 → 0.2.1): foutherstel zonder gedragsverandering voor de gebruiker.
+- **MINOR** (0.2.0 → 0.3.0): nieuwe functie of ander knopgedrag; bestaande instellingen blijven werken.
+- **MAJOR** (0.x → 1.0.0): instellingenbestand of API verandert zo dat oude instellingen niet meer werken. Zolang de versie met 0 begint, is de software nog in ontwikkeling.
 
 Werkwijze:
 
 ```sh
 git switch testing
+# Eerste wijziging na een release: versie ophogen in slingbag/__init__.py
 # wijzigen, testen, committen
-git push
+git push                                    # → v0.3.0-beta.1, v0.3.0-beta.2, ...
 gh pr create --base main --head testing --fill
+gh pr merge --merge                         # → v0.3.0 (latest)
 ```
+
+Een beta proberen op de Pi:
+
+```sh
+curl -fsSL https://github.com/Rik-Stokmans/slingbag/releases/latest/download/install.sh | SLINGBAG_VERSIE=beta bash
+```
+
+`SLINGBAG_VERSIE=v0.2.0` installeert een vaste versie, bijvoorbeeld om terug te gaan.
 
 ## Problemen oplossen
 

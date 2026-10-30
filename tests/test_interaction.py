@@ -184,11 +184,24 @@ def test_repeat_does_not_advance(env):  # FR-05
     assert "Zet het kopje onder het koffiezetapparaat." in last_spoken(env)
 
 
-def test_repeat_invitation(env):  # FR-05
+def test_start_with_help_from_invitation(env):  # FR-04
     env.c.invite("koffie", "planning")
     env.press("blauw")
-    assert env.c.state == UITNODIGING
-    assert "Wil je koffiezetten?" in last_spoken(env)[0]
+    assert env.c.state == BEGELEIDING and env.c.step == 0
+    assert ("keuze", "beginnen met hulp") in env.events()
+
+
+def test_yellow_repeats_and_blue_helps_when_not_finished(env):  # FR-04, FR-05
+    env.c.invite("koffie", "planning")
+    env.press("groen")
+    env.press("groen")
+    env.press("groen")
+    assert env.c.state == AFRONDEN
+    env.press("geel")
+    assert env.c.state == AFRONDEN
+    assert "Ben je klaar met koffiezetten?" in last_spoken(env)[0]
+    env.press("blauw")
+    assert env.c.state == BEGELEIDING and env.c.step == 0
 
 
 def test_pause_resume_keeps_step_and_stop_clears_postpone(env):  # FR-06

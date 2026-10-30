@@ -1,0 +1,52 @@
+name: beta
+
+# Elke push naar testing: tests, daarna een pre-release v<versie>-beta.<n>.
+on:
+  push:
+    branches: [testing]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  beta:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # met tags
+      - name: Betanummer bepalen
+        id: versie
+        run: |
+          VERSION=$(python3 -c "import slingbag; print(slingbag.__version__)")
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Versie $VERSION is al uitgebracht. Hoog de versie op in slingbag/__init__.py voor een nieuwe beta."
+            exit 1
+          fi
+          LAST=$(git tag -l "v$VERSION-beta.*" | sed 's/.*-beta\.//' | sort -n | tail -1)
+          N=$(( ${LAST:-0} + 1 ))
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "n=$N" >> "$GITHUB_OUTPUT"
+      - name: Zip bouwen
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix=slingbag/ -o dist/slingbag.zip HEAD
+          cp install.sh dist/install.sh
+      - name: Pre-release maken
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.versie.outputs.version }}
+          N: ${{ steps.versie.outputs.n }}
+        run: |
+          gh release create "v$VERSION-beta.$N" dist/slingbag.zip dist/install.sh \
+            --target "$GITHUB_SHA" \
+            --title "Slingbag $VERSION beta $N" \
+            --generate-notes --prerelease

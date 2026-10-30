@@ -1,5 +1,6 @@
 name: release
 
+# Elke merge naar main: tests, daarna release v<versie> als nieuwste (latest) release.
 on:
   push:
     branches: [main]
@@ -12,15 +13,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
   release:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
         with:
-          python-version: "3.11"
-      - run: pip install flask waitress pytest
-      - run: python -m pytest -q
+          fetch-depth: 0  # met tags
+      - name: Versie bepalen
+        id: versie
+        run: |
+          VERSION=$(python3 -c "import slingbag; print(slingbag.__version__)")
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Versie $VERSION is al uitgebracht."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Zip bouwen
         run: |
           mkdir -p dist
@@ -29,10 +40,11 @@ jobs:
       - name: Release maken
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.versie.outputs.version }}
         run: |
-          VERSION=$(python -c "import slingbag; print(slingbag.__version__)")
-          TAG="v${VERSION}-build.${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" dist/slingbag.zip dist/install.sh \
+          # Releasenotes vanaf de vorige vaste release, niet vanaf de laatste beta.
+          PREV=$(gh release list --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName')
+          gh release create "v$VERSION" dist/slingbag.zip dist/install.sh \
             --target "$GITHUB_SHA" \
-            --title "Slingbag ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
-            --generate-notes --latest
+            --title "Slingbag $VERSION" \
+            --generate-notes ${PREV:+--notes-start-tag "$PREV"} --latest

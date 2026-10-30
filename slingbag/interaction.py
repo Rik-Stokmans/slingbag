@@ -275,8 +275,9 @@ class InteractionController:
             self._say([self._text("weigering")])
             self._end("keuze", "nee")
         elif button == "blauw":
-            self._log("herhaal")
-            self._speak_invitation()
+            # Beginnen met hulp: meteen de eerste stap.
+            self._log("keuze", "beginnen met hulp")
+            self._go_to_step(0)
 
     def _start_independent(self) -> None:
         self._set_state(ZELFSTANDIG)
@@ -370,14 +371,13 @@ class InteractionController:
             self._say([closing])
             self._end("afgerond")
         elif button == "geel":
-            self._log("nog_niet_klaar")
-            if self.before_finish == BEGELEIDING:
-                self._go_to_step(self.step)
-            else:
-                self._start_independent()
-        elif button == "blauw":
+            self._log("herhaal")
             self._say([self._text("afronden_vraag", activiteit=self.activity["naam"])],
                       self._answer_wait(), self._back_from_finish)
+        elif button == "blauw":
+            # Nog niet klaar: hulp bij de huidige stap, of vanaf stap 1 na zelfstandig werken.
+            self._log("nog_niet_klaar")
+            self._go_to_step(self.step if self.before_finish == BEGELEIDING else 0)
         elif button == "rood":
             self.stop("rood")
 
