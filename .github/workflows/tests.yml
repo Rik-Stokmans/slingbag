@@ -1,10 +1,10 @@
 name: tests
 
+# Draait bij elke pull request naar main en als eerste stap van beta.yml en release.yml.
 on:
-  push:
-    branches: [testing]
   pull_request:
     branches: [main]
+  workflow_call:
 
 jobs:
   tests:

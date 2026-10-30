@@ -1,0 +1,32 @@
+name: versie
+
+# Een pull request naar main moet een nieuwe, hogere versie hebben (SemVer: MAJOR.MINOR.PATCH).
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+jobs:
+  versie:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # met tags
+      - name: Versie controleren
+        run: |
+          VERSION=$(python3 -c "import slingbag; print(slingbag.__version__)")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Versie '$VERSION' is geen SemVer (MAJOR.MINOR.PATCH)."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Versie $VERSION is al uitgebracht. Hoog de versie op in slingbag/__init__.py."
+            exit 1
+          fi
+          LAST=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -1)
+          if [ -n "$LAST" ] && [ "$(printf '%s\n%s\n' "$LAST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+            echo "::error::Versie $VERSION is lager dan de laatste release $LAST."
+            exit 1
+          fi
+          echo "Nieuwe versie $VERSION (vorige release: ${LAST:-geen})."
