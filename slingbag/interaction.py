@@ -2,6 +2,7 @@
 
 Vier knoppen krijgen per toestand een betekenis:
     groen = ja / volgende   geel = later / herhaal   blauw = hulp / pauze   rood = nee / stop
+In rust start blauw de hulpknop: een gesproken gesprek met de AI-assistent (assistent.py).
 De controller wordt alleen vanuit de gebeurtenislus van de service aangeroepen;
 daardoor verwerkt hij altijd één gebeurtenis tegelijk.
 """
@@ -23,10 +24,11 @@ ZELFSTANDIG = "zelfstandig"
 BEGELEIDING = "begeleiding"
 PAUZE = "pauze"
 AFRONDEN = "afronden"
+HULPGESPREK = "hulpgesprek"
 
 LIGHT_FOR_STATE = {
     RUST: "uit", UITNODIGING: "knipperen", KEUZE: "aan", ZELFSTANDIG: "aan",
-    BEGELEIDING: "aan", PAUZE: "pulseren", AFRONDEN: "aan",
+    BEGELEIDING: "aan", PAUZE: "pulseren", AFRONDEN: "aan", HULPGESPREK: "aan",
 }
 PRESS_LOCKOUT_S = 0.3  # één druk = één keuze, ook bij snel herhaald drukken
 
@@ -80,6 +82,7 @@ class InteractionController:
         self._deadline: tuple[float, Callable[[], None]] | None = None
         self._last_press = -1.0
         self._explained_steps = False
+        self.assistant = None  # HelpAssistant, gezet door de service
         self._update_light()
 
     # --- hulpfuncties ---------------------------------------------------------
@@ -151,7 +154,7 @@ class InteractionController:
             action = self._deadline[1]
             self._deadline = None
             action()
-        if self.postponed and self.clock.now() >= self.postponed[1]:
+        if self.postponed and self.clock.now() >= self.postponed[1] and self.state != HULPGESPREK:
             activity_id, _ = self.postponed
             self.postponed = None
             if self.state == RUST:
@@ -159,7 +162,7 @@ class InteractionController:
             else:
                 self._log("uitstel_vervallen", "er liep al een sessie")
 
-    def invite(self, activity_id: str, source: str) -> tuple[bool, str]:
+    def invite(self, activity_id: str, source: str, speak: bool = True) -> tuple[bool, str]:
         """Start een uitnodiging; tijdens een sessie start geen tweede (FR-02)."""
         if self.state != RUST:
             self.logbook.write(self.clock.now(), self.session, "uitnodiging_overgeslagen", self.state,
@@ -184,7 +187,8 @@ class InteractionController:
         self._explained_steps = False
         self._set_state(UITNODIGING)
         self._log("uitnodiging", f"bron: {source}")
-        self._speak_invitation(chime=True)
+        if speak:
+            self._speak_invitation(chime=True)
         return True, "Uitnodiging gestart."
 
     def _preflight(self, activity: dict) -> str | None:
@@ -204,6 +208,9 @@ class InteractionController:
 
     def stop(self, detail: str = "") -> None:
         """Stoppen kan altijd, ook tijdens spraak, en wist een gepland uitstel (FR-06)."""
+        if self.state == HULPGESPREK:
+            self.assistant.stop(detail or "app")
+            return
         if self.state == RUST and not self.postponed:
             self.audio.stop()
             return
@@ -244,8 +251,47 @@ class InteractionController:
             activity_id = self._default_activity_id()
             if activity_id:
                 self.invite(activity_id, "gebruiker")
+        elif button == "blauw":
+            self.start_help("knop")
         elif button == "rood":
             self.audio.stop()
+
+    # --- hulpknop ---------------------------------------------------------------
+
+    def start_help(self, source: str) -> tuple[bool, str]:
+        """Start een gesprek met de AI-assistent; alleen vanuit rust."""
+        if self.state != RUST:
+            return False, "Er loopt al een sessie."
+        if self.assistant is None or not self.assistant.enabled():
+            return False, "De hulpknop staat uit."
+        self.audio.stop()
+        self.session = secrets.token_hex(3)
+        self.source = source
+        self._set_state(HULPGESPREK)
+        if not self.assistant.start(self.session, source):
+            self._end("fout", "hulpgesprek liep nog")
+            return False, "Het vorige gesprek wordt nog afgesloten."
+        return True, "Hulpgesprek gestart."
+
+    def _press_hulpgesprek(self, button: str) -> None:
+        self.assistant.button(button)
+
+    def help_ended(self, activity_id: str | None = None) -> None:
+        """Het gesprek is klaar; eventueel start daarna meteen de begeleiding van een activiteit."""
+        if self.state != HULPGESPREK:
+            return
+        self._set_state(RUST)
+        self.session = ""
+        if activity_id:
+            self.start_guided(activity_id)
+
+    def start_guided(self, activity_id: str) -> tuple[bool, str]:
+        """Start direct met stap 1 (de gebruiker heeft in het hulpgesprek al ja gezegd)."""
+        ok, message = self.invite(activity_id, "hulpknop", speak=False)
+        if ok:
+            self._log("keuze", "beginnen met hulp (hulpknop)")
+            self._go_to_step(0, prefix=[], chime=True)
+        return ok, message
 
     def _default_activity_id(self) -> str | None:
         from .scheduler import Planner
@@ -308,7 +354,7 @@ class InteractionController:
         elif button == "rood":
             self.stop("rood")
 
-    def _go_to_step(self, index: int, prefix: list | None = None) -> None:
+    def _go_to_step(self, index: int, prefix: list | None = None, chime: bool = False) -> None:
         """Speelt één stap; de volgende stap komt pas na een bewuste keuze (FR-04)."""
         self.step = index
         self._set_state(BEGELEIDING)
@@ -318,7 +364,7 @@ class InteractionController:
         if self.config.get("knopuitleg") and not self._explained_steps:
             items.append(self._text("knoppen_stap"))
             self._explained_steps = True
-        self._say(items, self._minutes("sessie_max_min"), self._session_timeout)
+        self._say(items, self._minutes("sessie_max_min"), self._session_timeout, chime=chime)
 
     def _press_begeleiding(self, button: str) -> None:
         if button == "groen":
@@ -394,4 +440,5 @@ class InteractionController:
             "uitstel_tot": self.postponed[1].isoformat(timespec="minutes") if self.postponed else None,
             "fout": self.error,
             "lamp": getattr(self.panel, "light", None),
+            "hulp": self.assistant.snapshot() if self.assistant else None,
         }

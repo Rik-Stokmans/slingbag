@@ -23,13 +23,15 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--poort", type=int, default=8080)
     parser.add_argument("--audio-apparaat", default="plughw:CARD=Headphones,DEV=0")
+    parser.add_argument("--microfoon", default="auto",
+                        help="ALSA-apparaat voor de hulpknop, 'auto' (eerste opname-ingang) of 'geen'")
     parser.add_argument("--simulatie", action="store_true",
                         help="zonder GPIO: knoppen via het testpaneel in de app")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     service = SlingbagService(args.data, args.stemmen, args.piper, simulate=args.simulatie,
-                              audio_device=args.audio_apparaat)
+                              audio_device=args.audio_apparaat, microphone=args.microfoon)
     service.start()
     signal.signal(signal.SIGTERM, lambda *_: (service.close(), sys.exit(0)))
 

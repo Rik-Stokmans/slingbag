@@ -11,13 +11,17 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
-from .config import ConfigError
+from .config import ONLINE_STEMMEN, ConfigError
+from .geheugen import SOORTEN
+from .openrouter import AIUnavailable
 from .speech import SpeechUnavailable
 from .texts import DEFAULT_TEXTS
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 BUTTONS = {"groen", "geel", "blauw", "rood"}
 _RECORDING_ID = re.compile(r"^[a-f0-9]{12}$")
+_ITEM_ID = re.compile(r"^[a-f0-9]{8}$")
+_CONVERSATION_ID = re.compile(r"^\d{8}-\d{6}$")
 MAX_UPLOAD = 15 * 1024 * 1024
 
 
@@ -125,6 +129,123 @@ def create_app(service) -> Flask:
         if not _RECORDING_ID.match(recording_id) or not path.exists():
             return error("Opname niet gevonden.", 404)
         return send_file(path, mimetype="audio/wav")
+
+    # --- hulpknop -----------------------------------------------------------------------
+
+    def body() -> dict:
+        data = request.get_json(silent=True)
+        return data if isinstance(data, dict) else {}
+
+    @app.get("/api/hulp/opties")
+    def help_options():
+        return jsonify({"online_stemmen": ONLINE_STEMMEN, "soorten": list(SOORTEN)})
+
+    @app.get("/api/hulp/sleutel")
+    def key_status():
+        return jsonify(service.keys.summary())
+
+    @app.put("/api/hulp/sleutel")
+    def set_key():
+        key = str(body().get("sleutel", "")).strip()
+        if key and not re.match(r"^sk-or-[A-Za-z0-9_-]{20,200}$", key):
+            return error("Dit lijkt geen OpenRouter-sleutel (die begint met sk-or-).")
+        service.keys.set(key)
+        return jsonify(service.keys.summary())
+
+    @app.post("/api/hulp/test")
+    def test_connection():
+        try:
+            return jsonify({"ok": True, **service.ai.check()})
+        except AIUnavailable as exc:
+            return error(str(exc), 502)
+
+    @app.post("/api/hulp/start")
+    def start_help():
+        ok, message = service.call(lambda: service.controller.start_help("app"))
+        return jsonify({"ok": True, "melding": message}) if ok else error(message, 409)
+
+    @app.post("/api/hulp/zeg")
+    def say():
+        text = str(body().get("tekst", ""))[:500]
+        if not service.assistant.say_text(text):
+            return error("Er loopt geen hulpgesprek.", 409)
+        return jsonify({"ok": True})
+
+    @app.post("/api/hulp/stemtest")
+    def voice_test():
+        if service.controller.state != "rust":
+            return error("Wacht tot de huidige sessie klaar is.", 409)
+        name = service.config_store.get()["hulpknop"]["gebruiker"].get("naam") or ""
+        text = f"Hallo{' ' + name if name else ''}, zo klink ik als je op de blauwe knop drukt."
+        service.assistant.announce(text)
+        return jsonify({"ok": True, "stem": service.voice.mode()})
+
+    @app.post("/api/hulp/pushtest")
+    def push_test():
+        if not service.notifier.push_enabled():
+            return error("Zet de pushmelding aan, vul een onderwerp in en sla eerst op.")
+        ok = service.notifier.send(False, wait=True)
+        return jsonify({"ok": True}) if ok else error("De pushmelding kon niet worden verstuurd.", 502)
+
+    @app.get("/api/hulp/herinneringen")
+    def memories():
+        return jsonify(service.memory.memories())
+
+    @app.post("/api/hulp/herinneringen")
+    def add_memory():
+        data = body()
+        try:
+            return jsonify(service.memory.add_memory(data.get("tekst", ""), data.get("soort", "overig")))
+        except ValueError as exc:
+            return error(str(exc))
+
+    @app.put("/api/hulp/herinneringen/<memory_id>")
+    def update_memory(memory_id: str):
+        data = body()
+        try:
+            item = service.memory.update_memory(memory_id, data.get("tekst", ""), data.get("soort"))
+        except ValueError as exc:
+            return error(str(exc))
+        return jsonify(item) if item else error("Herinnering niet gevonden.", 404)
+
+    @app.delete("/api/hulp/herinneringen/<memory_id>")
+    def delete_memory(memory_id: str):
+        if not _ITEM_ID.match(memory_id) or not service.memory.delete_memory(memory_id):
+            return error("Herinnering niet gevonden.", 404)
+        return jsonify({"ok": True})
+
+    @app.delete("/api/hulp/herinneringen")
+    def clear_memories():
+        service.memory.clear_memories()
+        return jsonify({"ok": True})
+
+    @app.get("/api/hulp/hulpvragen")
+    def help_requests():
+        return jsonify(service.memory.help_requests()[::-1])
+
+    @app.post("/api/hulp/hulpvragen/<request_id>")
+    def respond(request_id: str):
+        data = body()
+        message = str(data.get("bericht") or "").strip()[:200] or None
+        try:
+            item = service.caretaker_reply(request_id, data.get("status", "gezien"), message)
+        except ValueError as exc:
+            return error(str(exc))
+        return jsonify(item) if item else error("Hulpvraag niet gevonden.", 404)
+
+    @app.get("/api/hulp/gesprekken")
+    def conversations():
+        return jsonify(service.memory.conversations())
+
+    @app.get("/api/hulp/gesprekken/<conversation_id>")
+    def conversation(conversation_id: str):
+        item = service.memory.conversation(conversation_id) if _CONVERSATION_ID.match(conversation_id) else None
+        return jsonify(item) if item else error("Gesprek niet gevonden.", 404)
+
+    @app.delete("/api/hulp/gesprekken")
+    def clear_conversations():
+        service.memory.clear_conversations()
+        return jsonify({"ok": True})
 
     # --- logboek ----------------------------------------------------------------------
 

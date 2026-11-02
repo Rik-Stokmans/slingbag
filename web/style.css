@@ -131,7 +131,7 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
 
 .tabs {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   background: var(--card); border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -149,3 +149,27 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
   white-space: pre-line;
 }
 .toast.bad { background: var(--danger); color: #fff; }
+
+/* Hulpknop */
+.alert-banner {
+  width: 100%; margin-bottom: 14px; min-height: 56px; font-weight: 700;
+  background: var(--rood); color: #fff; border: none; animation: attention 1.6s ease-in-out infinite;
+}
+@keyframes attention { 50% { opacity: 0.75; } }
+.tabs button { position: relative; }
+.badge {
+  position: absolute; top: 8px; right: 10%; min-width: 18px; height: 18px; border-radius: 9px;
+  background: var(--rood); color: #fff; font-size: 0.7rem; line-height: 18px; padding: 0 4px;
+}
+.chat { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 50vh; overflow-y: auto; }
+.chat .bubble { padding: 8px 12px; border-radius: 12px; max-width: 88%; }
+.chat .gebruiker { align-self: flex-end; background: var(--accent); color: var(--accent-text); }
+.chat .assistent { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); }
+.request { border-top: 1px solid var(--line); padding: 10px 0; }
+.request:first-child { border-top: none; }
+.request.open .request-head { color: var(--danger); font-weight: 700; }
+.request .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.memory { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: start; margin: 8px 0; }
+.memory .meta { font-size: 0.75rem; color: var(--muted); }
+.window { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.window input[type=time] { width: 110px; }
