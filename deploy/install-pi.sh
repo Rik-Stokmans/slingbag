@@ -43,6 +43,27 @@ CONFIG_TXT=/boot/firmware/config.txt
 grep -q '^dtparam=audio=on' "$CONFIG_TXT" || echo 'dtparam=audio=on' | sudo tee -a "$CONFIG_TXT" >/dev/null
 amixer -q -c Headphones sset PCM 70% unmute 2>/dev/null || echo "Koptelefoonuitgang nog niet zichtbaar; na een herstart opnieuw proberen."
 
+step "Hulpknop: USB-microfoon en OpenRouter-sleutel"
+MIC_CARD=$(arecord -l 2>/dev/null | sed -n 's/^card [0-9]*: \([^ ]*\) .*/\1/p' | head -1)
+if [ -n "$MIC_CARD" ]; then
+  echo "Microfoon gevonden: $MIC_CARD"
+  # Opnameniveau omhoog; de naam van de regelaar verschilt per microfoon.
+  for control in Mic Capture "Mic Capture"; do
+    amixer -q -c "$MIC_CARD" sset "$control" 80% cap 2>/dev/null && break
+  done
+else
+  echo "LET OP: geen microfoon gevonden. Sluit de USB-microfoon aan; de hulpknop luistert pas daarna."
+fi
+mkdir -p "$DATA_DIR/geheim"
+chmod 700 "$DATA_DIR/geheim"
+if [ -n "${SLINGBAG_OPENROUTER_KEY:-}" ]; then
+  # Sleutel alleen in een eigen bestand op de Pi, niet in config.json en niet in de repository.
+  ( umask 077; printf '%s\n' "$SLINGBAG_OPENROUTER_KEY" > "$DATA_DIR/geheim/openrouter.key" )
+  echo "OpenRouter-sleutel opgeslagen."
+elif [ ! -s "$DATA_DIR/geheim/openrouter.key" ]; then
+  echo "Nog geen OpenRouter-sleutel: stel hem in via de app (tab Hulpknop)."
+fi
+
 step "Wifi: eigen netwerk '$HOTSPOT_SSID' als terugvaloptie"
 sudo raspi-config nonint do_wifi_country NL || true
 sudo rfkill unblock wifi || true

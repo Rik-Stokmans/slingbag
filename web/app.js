@@ -12,6 +12,7 @@ const STATE_LABELS = {
   begeleiding: "Stap voor stap",
   pauze: "Gepauzeerd",
   afronden: "Vraagt of het klaar is",
+  hulpgesprek: "Hulpgesprek",
 };
 const DAYS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
 
@@ -84,12 +85,15 @@ function markDirty() {
 
 // --- tabs ------------------------------------------------------------------------------
 
-$$(".tabs button").forEach((btn) => btn.addEventListener("click", () => {
-  $$(".tabs button").forEach((b) => b.classList.toggle("active", b === btn));
-  $$(".tab").forEach((t) => t.classList.toggle("active", t.id === `tab-${btn.dataset.tab}`));
-  if (btn.dataset.tab === "logboek") loadLog();
+function showTab(name) {
+  $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $$(".tab").forEach((t) => t.classList.toggle("active", t.id === `tab-${name}`));
+  if (name === "logboek") loadLog();
+  if (name === "hulp") loadHelp();
   window.scrollTo(0, 0);
-}));
+}
+$$(".tabs button").forEach((btn) => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
+$$("[data-goto]").forEach((btn) => btn.addEventListener("click", () => showTab(btn.dataset.goto)));
 
 // --- status ------------------------------------------------------------------------------
 
@@ -122,6 +126,7 @@ async function refreshStatus() {
     $("#voorbereiding").textContent = !s.spraakengine ? "alleen opnames"
       : p.bezig ? `voorbereiden ${p.klaar}/${p.totaal}` : p.fout ? "fout bij voorbereiden" : "gereed";
     $("#versie").textContent = `Softwareversie ${s.versie}`;
+    if (s.hulp) updateHelpStatus(s.hulp);
   } catch {
     $("#verbinding").textContent = "geen verbinding";
     $("#verbinding").className = "pill bad";
@@ -330,6 +335,235 @@ $("#logboek-wissen").addEventListener("click", async () => {
 
 // --- opslaan -----------------------------------------------------------------------------------
 
+// --- hulpknop -------------------------------------------------------------------------------------
+
+const PHASE_LABELS = {
+  uit: "Geen gesprek", verbinden: "Verbinden…", luisteren: "Luistert", denken: "Denkt na", spreken: "Spreekt",
+};
+const PHASE_LIGHT = { verbinden: "aan", luisteren: "aan", denken: "pulseren", spreken: "aan" };
+const SOORT_LABELS = {
+  persoon: "persoon", voorkeur: "voorkeur", routine: "routine", gezondheid: "gezondheid", afspraak: "afspraak", overig: "overig",
+};
+let helpOptions = { online_stemmen: [], soorten: Object.keys(SOORT_LABELS) };
+let lastOpenCount = 0;
+let lastTranscript = "";
+
+function getPath(obj, path) { return path.split(".").reduce((o, k) => o?.[k], obj); }
+function setPath(obj, path, value) {
+  const keys = path.split(".");
+  const last = keys.pop();
+  keys.reduce((o, k) => o[k], obj)[last] = value;
+}
+
+// Alle velden met data-pad zijn rechtstreeks gekoppeld aan config.hulpknop.
+$$("[data-pad]").forEach((el) => {
+  const event = el.type === "checkbox" || el.tagName === "SELECT" ? "change" : "input";
+  el.addEventListener(event, () => {
+    let value = el.value;
+    if (el.type === "checkbox") value = el.checked;
+    else if (el.type === "number" || el.type === "range") value = parseFloat(el.value) || 0;
+    setPath(config, el.dataset.pad, value);
+    if (el.dataset.pad.endsWith("spreeksnelheid")) $("#snelheid-waarde").textContent = `${value}×`;
+    markDirty();
+  });
+});
+
+async function renderHelpSettings() {
+  helpOptions = await api("/api/hulp/opties").catch(() => helpOptions);
+  const voiceSelect = $("#online-stem");
+  const voices = [...new Set([...helpOptions.online_stemmen, config.hulpknop.online_stem])];
+  voiceSelect.replaceChildren(...voices.map((v) => h("option", { value: v }, v)));
+  $("#herinnering-soort").replaceChildren(...helpOptions.soorten.map((k) => h("option", { value: k }, SOORT_LABELS[k] || k)));
+  $$("[data-pad]").forEach((el) => {
+    const value = getPath(config, el.dataset.pad);
+    if (el.type === "checkbox") el.checked = !!value;
+    else el.value = value ?? "";
+  });
+  $("#snelheid-waarde").textContent = `${config.hulpknop.spreeksnelheid}×`;
+  renderWindows();
+  loadKey();
+}
+
+function renderWindows() {
+  const caretaker = config.hulpknop.begeleider;
+  $("#tijdvakken").replaceChildren(...caretaker.tijden.map((w, wi) => {
+    const from = h("input", { type: "time", value: w.van, "aria-label": "Van" });
+    const to = h("input", { type: "time", value: w.tot, "aria-label": "Tot" });
+    from.addEventListener("change", () => { w.van = from.value; markDirty(); });
+    to.addEventListener("change", () => { w.tot = to.value; markDirty(); });
+    const days = h("div", { class: "days" }, DAYS.map((d, i) => {
+      const box = h("input", { type: "checkbox", checked: w.dagen.includes(i + 1) });
+      box.addEventListener("change", () => {
+        w.dagen = box.checked ? [...w.dagen, i + 1].sort() : w.dagen.filter((x) => x !== i + 1);
+        markDirty();
+      });
+      return h("label", {}, box, h("span", {}, d));
+    }));
+    return h("div", { class: "card" },
+      h("div", { class: "window" }, "van", from, "tot", to,
+        h("button", { class: "small danger", onclick: () => { caretaker.tijden.splice(wi, 1); renderWindows(); markDirty(); } }, "✕")),
+      days);
+  }));
+}
+$("#nieuw-tijdvak").addEventListener("click", () => {
+  config.hulpknop.begeleider.tijden.push({ dagen: [1, 2, 3, 4, 5, 6, 7], van: "09:00", tot: "21:00" });
+  renderWindows();
+  markDirty();
+});
+
+function updateHelpStatus(hulp) {
+  $("#hulp-fase").textContent = hulp.actief ? PHASE_LABELS[hulp.fase] || hulp.fase : "Hulpknop staat uit";
+  $("#hulp-lamp").className = `lamp ${PHASE_LIGHT[hulp.fase] || ""}`;
+  const active = hulp.fase !== "uit";
+  $("#hulp-start").classList.toggle("hidden", active);
+  $("#hulp-stop").classList.toggle("hidden", !active);
+  $("#hulp-gesprek-uit").classList.toggle("hidden", hulp.gesprek !== null);
+  const transcript = JSON.stringify(hulp.gesprek || []);
+  if (transcript !== lastTranscript) {
+    lastTranscript = transcript;
+    const chat = $("#hulp-gesprek");
+    chat.replaceChildren(...(hulp.gesprek || []).map((t) => h("div", { class: `bubble ${t.rol}` }, t.tekst)));
+    chat.scrollTop = chat.scrollHeight;
+  }
+  const open = hulp.open_hulpvragen || 0;
+  $("#hulp-banner").classList.toggle("hidden", open === 0);
+  $("#hulp-badge").textContent = open;
+  $("#hulp-badge").classList.toggle("hidden", open === 0);
+  if (open > lastOpenCount) {
+    // Nieuwe hulpvraag: trillen (Android) en de lijst verversen.
+    navigator.vibrate?.([300, 150, 300, 150, 300]);
+    loadRequests();
+  }
+  lastOpenCount = open;
+}
+
+async function loadHelp() {
+  await Promise.all([loadRequests(), loadMemories(), loadConversations(), loadKey()]);
+}
+
+async function loadKey() {
+  const key = await api("/api/hulp/sleutel").catch(() => null);
+  if (key) $("#sleutel-status").textContent = key.ingesteld ? `· ingesteld (…${key.eind})` : "· nog niet ingesteld";
+}
+
+async function loadRequests() {
+  const items = await api("/api/hulp/hulpvragen").catch(() => []);
+  const name = config?.hulpknop.begeleider.naam || "begeleider";
+  const reply = (item, status, bericht) => async () => {
+    try {
+      await api(`/api/hulp/hulpvragen/${item.id}`, { method: "POST", json: { status, bericht } });
+      toast(bericht ? "Verstuurd: wordt voorgelezen op de slingbag" : "Bijgewerkt");
+      loadRequests();
+      refreshStatus();
+    } catch (e) { toast(e.message, true); }
+  };
+  $("#hulpvragen").replaceChildren(...(items.length ? items.slice(0, 20).map((item) => {
+    const custom = h("input", { type: "text", maxlength: 200, placeholder: "Eigen bericht, wordt voorgelezen" });
+    return h("div", { class: `request ${item.status}` },
+      h("div", { class: "request-head" },
+        `${item.spoed ? "🚨 Dringend · " : ""}${time(item.tijdstip)} · ${item.status}`),
+      h("div", {}, item.reden),
+      item.reactie ? h("div", { class: "muted small" }, `Reactie van ${name}: “${item.reactie}”`) : "",
+      item.status === "afgehandeld" ? "" : h("div", { class: "actions" },
+        h("button", { class: "small primary", onclick: reply(item, "gezien", "Ik kom eraan.") }, "Ik kom eraan"),
+        h("button", { class: "small", onclick: reply(item, "gezien", "Ik bel je zo.") }, "Ik bel je zo"),
+        h("button", { class: "small", onclick: reply(item, "afgehandeld") }, "Afgehandeld")),
+      item.status === "afgehandeld" ? "" : h("div", { class: "row" }, custom,
+        h("button", { class: "small", onclick: () => custom.value.trim() && reply(item, "gezien", custom.value.trim())() }, "Stuur")));
+  }) : [h("p", { class: "muted" }, "Nog geen hulpvragen.")]));
+}
+
+async function loadMemories() {
+  const items = await api("/api/hulp/herinneringen").catch(() => []);
+  $("#herinneringen").replaceChildren(...(items.length ? items.map((m) => {
+    const area = h("textarea", { rows: 2, maxlength: 300 });
+    area.value = m.tekst;
+    area.addEventListener("change", async () => {
+      try { await api(`/api/hulp/herinneringen/${m.id}`, { method: "PUT", json: { tekst: area.value } }); toast("Herinnering bijgewerkt"); }
+      catch (e) { toast(e.message, true); }
+    });
+    return h("div", { class: "memory" },
+      h("div", {}, area, h("div", { class: "meta" },
+        `${SOORT_LABELS[m.soort] || m.soort} · ${m.bron === "begeleider" ? "ingevuld door begeleider" : "uit een gesprek"} · ${m.bijgewerkt.slice(0, 10)}`)),
+      h("button", { class: "small danger", title: "Verwijderen", onclick: async () => {
+        await api(`/api/hulp/herinneringen/${m.id}`, { method: "DELETE" }).catch((e) => toast(e.message, true));
+        loadMemories();
+      } }, "✕"));
+  }) : [h("p", { class: "muted" }, "Nog geen herinneringen.")]));
+}
+$("#herinnering-toevoegen").addEventListener("click", async () => {
+  const tekst = $("#herinnering-tekst").value.trim();
+  if (!tekst) return;
+  try {
+    await api("/api/hulp/herinneringen", { method: "POST", json: { tekst, soort: $("#herinnering-soort").value } });
+    $("#herinnering-tekst").value = "";
+    loadMemories();
+  } catch (e) { toast(e.message, true); }
+});
+$("#herinneringen-wissen").addEventListener("click", async () => {
+  if (!confirm("Alle herinneringen wissen? Dit kan niet ongedaan worden gemaakt.")) return;
+  await api("/api/hulp/herinneringen", { method: "DELETE" });
+  loadMemories();
+});
+
+async function loadConversations() {
+  const items = await api("/api/hulp/gesprekken").catch(() => []);
+  $("#gesprekken").replaceChildren(...(items.length ? items.map((c) => {
+    const body = h("div", { class: "chat hidden" });
+    return h("div", { class: "request" },
+      h("button", { class: "small", onclick: async () => {
+        if (body.classList.toggle("hidden")) return;
+        const full = await api(`/api/hulp/gesprekken/${c.id}`).catch(() => null);
+        body.replaceChildren(...(full?.beurten || []).map((t) => h("div", { class: `bubble ${t.rol}` }, t.tekst)));
+      } }, `${time(c.begin)} · ${c.beurten} beurten`), body);
+  }) : [h("p", { class: "muted" }, "Geen bewaarde gesprekken.")]));
+}
+$("#gesprekken-wissen").addEventListener("click", async () => {
+  if (!confirm("Alle bewaarde gesprekken wissen?")) return;
+  await api("/api/hulp/gesprekken", { method: "DELETE" });
+  loadConversations();
+});
+
+$("#sleutel-opslaan").addEventListener("click", async () => {
+  try {
+    await api("/api/hulp/sleutel", { method: "PUT", json: { sleutel: $("#sleutel").value } });
+    $("#sleutel").value = "";
+    toast("Sleutel opgeslagen op de slingbag");
+    loadKey();
+  } catch (e) { toast(e.message, true); }
+});
+$("#hulp-test").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/hulp/test", { method: "POST" });
+    toast(`Verbinding werkt${r.verbruikt != null ? ` · verbruikt: $${Number(r.verbruikt).toFixed(2)}` : ""}`);
+  } catch (e) { toast(e.message, true); }
+});
+$("#hulp-start").addEventListener("click", async () => {
+  try { await api("/api/hulp/start", { method: "POST" }); } catch (e) { toast(e.message, true); }
+  refreshStatus();
+});
+$("#hulp-stop").addEventListener("click", async () => {
+  await api("/api/acties/stop", { method: "POST" }).catch((e) => toast(e.message, true));
+  refreshStatus();
+});
+async function sayTyped() {
+  const tekst = $("#hulp-tekst").value.trim();
+  if (!tekst) return;
+  try { await api("/api/hulp/zeg", { method: "POST", json: { tekst } }); $("#hulp-tekst").value = ""; }
+  catch (e) { toast(e.message, true); }
+}
+$("#hulp-zeg").addEventListener("click", sayTyped);
+$("#hulp-tekst").addEventListener("keydown", (e) => { if (e.key === "Enter") sayTyped(); });
+$("#hulp-stemtest").addEventListener("click", async () => {
+  if (JSON.stringify(config) !== JSON.stringify(savedConfig)) toast("Sla eerst op om de nieuwe stem te horen");
+  try { const r = await api("/api/hulp/stemtest", { method: "POST" }); toast(`Speelt af (${r.stem === "online" ? "natuurlijke stem" : "Piper"})`); }
+  catch (e) { toast(e.message, true); }
+});
+$("#push-test").addEventListener("click", async () => {
+  try { await api("/api/hulp/pushtest", { method: "POST" }); toast("Testmelding verstuurd"); }
+  catch (e) { toast(e.message, true); }
+});
+
 function changed() { renderAll(); markDirty(); }
 
 function renderAll() {
@@ -365,6 +599,7 @@ async function init(fetchConfig = true) {
   if (!voices.includes(config.stem)) voices.unshift(config.stem);
   renderAll();
   renderSettings(voices);
+  await renderHelpSettings();
   markDirty();
 }
 

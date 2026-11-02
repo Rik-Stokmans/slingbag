@@ -22,6 +22,7 @@
   <main>
     <!-- Nu: status, handmatig starten en testknoppen -->
     <section id="tab-nu" class="tab active">
+      <button id="hulp-banner" class="alert-banner hidden" data-goto="hulp">Er is hulp gevraagd. Bekijk de hulpvraag</button>
       <div class="card status-card">
         <div class="status-row">
           <span id="lamp" class="lamp" title="statuslampje"></span>
@@ -55,9 +56,130 @@
         <div class="testpad">
           <button class="pad groen" data-knop="groen">Ja<br><small>volgende</small></button>
           <button class="pad geel" data-knop="geel">Later<br><small>herhaal</small></button>
-          <button class="pad blauw" data-knop="blauw">Hulp<br><small>pauze</small></button>
+          <button class="pad blauw" data-knop="blauw">Hulp<br><small>pauze · in rust: hulpknop</small></button>
           <button class="pad rood" data-knop="rood">Nee<br><small>stop</small></button>
         </div>
+      </div>
+    </section>
+
+    <!-- Hulpknop: AI-gesprek, hulpvragen, profiel, begeleider, herinneringen en privacy -->
+    <section id="tab-hulp" class="tab">
+      <div class="card">
+        <h2>Hulpvragen</h2>
+        <p class="muted small">Hier verschijnt het als de assistent vindt dat er een mens nodig is. Een reactie wordt op de slingbag voorgelezen.</p>
+        <div id="hulpvragen"><p class="muted">Nog geen hulpvragen.</p></div>
+      </div>
+
+      <div class="card">
+        <h2>Gesprek</h2>
+        <div class="status-row"><span id="hulp-lamp" class="lamp"></span><div id="hulp-fase" class="state">—</div></div>
+        <div id="hulp-gesprek" class="chat"></div>
+        <p id="hulp-gesprek-uit" class="muted small">Zet <em>Gesprekken tonen en bewaren</em> aan (onderaan) om het gesprek hier mee te lezen.</p>
+        <div class="row">
+          <input id="hulp-tekst" type="text" placeholder="Typ wat de gebruiker zegt (om te testen)" aria-label="Tekst van de gebruiker">
+          <button id="hulp-zeg">Zeg</button>
+        </div>
+        <button id="hulp-start" class="primary wide">Start hulpgesprek</button>
+        <button id="hulp-stop" class="danger wide">Stop gesprek</button>
+      </div>
+
+      <div class="card">
+        <h2>Over de gebruiker</h2>
+        <label>Naam<input type="text" data-pad="hulpknop.gebruiker.naam" maxlength="60" placeholder="Bijvoorbeeld: Jan"></label>
+        <label>Aanspreken met
+          <select data-pad="hulpknop.gebruiker.aanspreekvorm"><option value="je">je</option><option value="u">u</option></select>
+        </label>
+        <label>Wat moet de assistent weten?
+          <textarea data-pad="hulpknop.gebruiker.over" rows="5" maxlength="3000" placeholder="Bijvoorbeeld: woont alleen, dochter Anna komt op zondag, houdt van wandelen en koffie, raakt onrustig aan het eind van de middag."></textarea>
+        </label>
+        <label>Noodplan (wordt genoemd bij gevaar)
+          <textarea data-pad="hulpknop.gebruiker.noodplan" rows="2" maxlength="500"></textarea>
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>Begeleider</h2>
+        <label>Naam<input type="text" data-pad="hulpknop.begeleider.naam" maxlength="60" placeholder="Bijvoorbeeld: Anna"></label>
+        <label>Relatie<input type="text" data-pad="hulpknop.begeleider.relatie" maxlength="60" placeholder="Bijvoorbeeld: dochter of wijkverpleegkundige"></label>
+        <label class="switch"><input type="checkbox" data-pad="hulpknop.begeleider.bereikbaar"> Bereikbaar voor hulpvragen</label>
+        <div class="subhead">Bereikbare tijden (leeg = altijd)</div>
+        <div id="tijdvakken"></div>
+        <button id="nieuw-tijdvak" class="small">+ Tijdvak</button>
+        <div class="subhead">Pushmelding op je telefoon (optioneel)</div>
+        <p class="muted small">Via de app <em>ntfy</em>: abonneer je op hetzelfde onderwerp. De melding zegt alleen dát er hulp is gevraagd; de reden blijft op de slingbag. Kies een lang, moeilijk te raden onderwerp.</p>
+        <label class="switch"><input type="checkbox" data-pad="hulpknop.begeleider.pushmelding.actief"> Pushmelding aan</label>
+        <label>Server<input type="text" data-pad="hulpknop.begeleider.pushmelding.server"></label>
+        <label>Onderwerp<input type="text" data-pad="hulpknop.begeleider.pushmelding.onderwerp" maxlength="64" placeholder="bijvoorbeeld slingbag-jan-7f3k9q"></label>
+        <button id="push-test" class="small">Stuur testmelding</button>
+      </div>
+
+      <div class="card">
+        <h2>Herinneringen</h2>
+        <p class="muted small">Wat de assistent over de gebruiker weet. Na elk gesprek stelt de assistent zelf aanvullingen voor; wat jij invult blijft altijd staan. Alles staat alleen op de slingbag.</p>
+        <div id="herinneringen"></div>
+        <textarea id="herinnering-tekst" rows="2" maxlength="300" placeholder="Bijvoorbeeld: Kleinzoon Daan belt elke woensdag."></textarea>
+        <div class="row">
+          <select id="herinnering-soort" aria-label="Soort"></select>
+          <button id="herinnering-toevoegen">+ Toevoegen</button>
+        </div>
+        <button id="herinneringen-wissen" class="danger small">Alle herinneringen wissen</button>
+      </div>
+
+      <div class="card">
+        <h2>AI en privacy</h2>
+        <label>OpenRouter-sleutel <span id="sleutel-status" class="muted small"></span>
+          <input id="sleutel" type="password" autocomplete="off" placeholder="sk-or-…">
+        </label>
+        <div class="row">
+          <button id="sleutel-opslaan" class="small">Sleutel opslaan</button>
+          <button id="hulp-test" class="small">Test verbinding</button>
+        </div>
+        <label class="switch"><input type="checkbox" data-pad="hulpknop.actief"> Hulpknop aan (blauw in rust start een gesprek)</label>
+        <label>Stem
+          <select data-pad="hulpknop.stembron">
+            <option value="online">Natuurlijke stem (online, zonder opslag)</option>
+            <option value="lokaal">Piper-stem (volledig op de slingbag)</option>
+          </select>
+        </label>
+        <label>Natuurlijke stem<select id="online-stem" data-pad="hulpknop.online_stem"></select></label>
+        <label>Spreeksnelheid <output id="snelheid-waarde"></output>
+          <input type="range" min="0.6" max="1.3" step="0.05" data-pad="hulpknop.spreeksnelheid">
+        </label>
+        <button id="hulp-stemtest" class="small">Laat horen op de slingbag</button>
+        <label>Na zoveel seconden stilte is de gebruiker klaar met praten
+          <input type="number" min="0.6" max="5" step="0.1" data-pad="hulpknop.spreekpauze_s">
+        </label>
+        <label>Gesprek stopt na zoveel seconden zonder antwoord (twee keer)
+          <input type="number" min="4" max="60" data-pad="hulpknop.stilte_s">
+        </label>
+        <label>Maximale gespreksduur (minuten)
+          <input type="number" min="2" max="60" data-pad="hulpknop.gesprek_max_min">
+        </label>
+        <label class="switch"><input type="checkbox" data-pad="hulpknop.geheugen_bijwerken"> Na een gesprek herinneringen bijwerken</label>
+        <label class="switch"><input type="checkbox" data-pad="hulpknop.gesprekken_bewaren"> Gesprekken tonen en bewaren (voor testen)</label>
+        <label>Bewaartermijn gesprekken (dagen)
+          <input type="number" min="1" max="90" data-pad="hulpknop.bewaartermijn_dagen">
+        </label>
+        <details>
+          <summary class="muted small">Geavanceerd: modellen</summary>
+          <label>Gespreksmodel<input type="text" data-pad="hulpknop.model"></label>
+          <label>Nadenken vóór het antwoord
+            <select data-pad="hulpknop.denkniveau">
+              <option value="minimal">minimaal (snelst)</option><option value="low">laag (aanbevolen)</option>
+              <option value="medium">gemiddeld</option><option value="high">hoog (traag)</option>
+            </select>
+          </label>
+          <label>Spraakherkenning<input type="text" data-pad="hulpknop.transcriptiemodel"></label>
+          <label>Stemmodel<input type="text" data-pad="hulpknop.stemmodel"></label>
+          <label class="switch"><input type="checkbox" data-pad="hulpknop.alleen_zdr"> Alleen aanbieders zonder gegevensopslag (aanbevolen)</label>
+        </details>
+        <p class="muted small">Wat de gebruiker zegt gaat voor verwerking naar OpenRouter en de gekozen aanbieder, die het niet bewaren en er niet mee trainen. Herinneringen, hulpvragen en gesprekken staan alleen op de slingbag; opnames worden nergens bewaard.</p>
+      </div>
+
+      <div id="gesprekken-kaart" class="card">
+        <h2>Bewaarde gesprekken</h2>
+        <div id="gesprekken"><p class="muted">Geen bewaarde gesprekken.</p></div>
+        <button id="gesprekken-wissen" class="danger small">Alle gesprekken wissen</button>
       </div>
     </section>
 
@@ -127,6 +249,7 @@
 
   <nav class="tabs">
     <button data-tab="nu" class="active">Nu</button>
+    <button data-tab="hulp">Hulpknop<span id="hulp-badge" class="badge hidden"></span></button>
     <button data-tab="activiteiten">Activiteiten</button>
     <button data-tab="planning">Planning</button>
     <button data-tab="instellingen">Instellingen</button>

@@ -19,4 +19,7 @@ rsync -az --delete -e "ssh ${SSH_OPTS[*]}" \
   "$HERE/" "$PI:slingbag/"
 
 echo "==> Installeren op de Pi"
-ssh "${SSH_OPTS[@]}" "$PI" 'bash ~/slingbag/deploy/install-pi.sh'
+# Optioneel: SLINGBAG_OPENROUTER_KEY=sk-or-... ./deploy/deploy.sh zet de sleutel voor de hulpknop op de Pi.
+# De sleutel gaat via stdin, zodat hij niet in de proceslijst of shellgeschiedenis van de Pi komt.
+printf '%s' "${SLINGBAG_OPENROUTER_KEY:-}" | ssh "${SSH_OPTS[@]}" "$PI" \
+  'KEY=$(cat); SLINGBAG_OPENROUTER_KEY="$KEY" bash ~/slingbag/deploy/install-pi.sh'

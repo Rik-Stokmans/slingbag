@@ -8,6 +8,7 @@ gebeurtenissen nooit tegelijk de toestand veranderen.
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import shutil
 import subprocess
@@ -17,13 +18,19 @@ from concurrent.futures import Future
 from pathlib import Path
 
 from . import __version__
+from .assistent import HelpAssistant
 from .audio import AudioPlayer
+from .begeleider import Notifier
 from .config import ConfigStore
+from .geheugen import MemoryStore
 from .hardware import create_panel
 from .interaction import InteractionController, SystemClock, session_items
 from .logbook import Logbook
+from .microfoon import Microphone
+from .openrouter import KeyStore, OpenRouterClient
 from .scheduler import Planner
 from .speech import PiperEngine, SpeechLibrary
+from .stem import Voice
 
 log = logging.getLogger(__name__)
 TICK_S = 0.25
@@ -32,7 +39,7 @@ TICK_S = 0.25
 class SlingbagService:
     def __init__(self, data_dir: Path, voices_dir: Path, piper_binary: Path | None = None,
                  simulate: bool = False, audio_device: str = "plughw:CARD=Headphones,DEV=0",
-                 clock=None):
+                 clock=None, microphone: str = "auto"):
         self.data_dir = Path(data_dir)
         self.clock = clock or SystemClock()
         self.events: queue.Queue = queue.Queue()
@@ -50,6 +57,22 @@ class SlingbagService:
             clock=self.clock,
             notify_audio_done=lambda token: self.post(lambda: self.controller.audio_finished(token)),
         )
+        # Hulpknop: AI-gesprek met de blauwe knop. Sleutel en herinneringen staan alleen op de Pi.
+        help_settings = lambda: self.config_store.get()["hulpknop"]  # noqa: E731
+        self.keys = KeyStore(self.data_dir / "geheim" / "openrouter.key",
+                             fallback=os.environ.get("OPENROUTER_API_KEY"))
+        self.ai = OpenRouterClient(self.keys, help_settings)
+        self.memory = MemoryStore(self.data_dir, self.clock)
+        self.voice = Voice(self.ai, self.speech, self.audio, help_settings,
+                           lambda: self.config_store.get()["stem"], self.data_dir / "cache" / "hulp")
+        self.microphone = Microphone(microphone)
+        self.notifier = Notifier(help_settings)
+        self.assistant = HelpAssistant(
+            self.config_store, self.ai, self.voice, self.microphone, self.memory, self.notifier,
+            self.panel, self.logbook, self.clock, simulate=simulate,
+            on_ended=lambda activity: self.post(lambda: self.controller.help_ended(activity)),
+        )
+        self.controller.assistant = self.assistant
         self._thread = threading.Thread(target=self._run, name="gebeurtenislus", daemon=True)
 
     # --- levenscyclus ------------------------------------------------------------
@@ -57,12 +80,15 @@ class SlingbagService:
     def start(self) -> None:
         self.audio.set_volume(self.config_store.get()["volume"])
         self.prepare_speech()
+        self.memory.purge_conversations(self.config_store.get()["hulpknop"]["bewaartermijn_dagen"])
         self.logbook.write(self.clock.now(), "", "opgestart", "rust", detail=f"versie {__version__}")
         self._thread.start()
 
     def close(self) -> None:
         self._stopping.set()
+        self.assistant.stop("afsluiten")
         self.audio.stop()
+        self.voice.close()
         self.panel.close()
 
     def _run(self) -> None:
@@ -113,6 +139,22 @@ class SlingbagService:
                 keep.add(self.speech.cache_path(text, voice))
         self.speech.cleanup(keep)
         self.speech.prepare_async(items, voice)
+
+    def caretaker_reply(self, request_id: str, status: str, message: str | None) -> dict | None:
+        """De begeleider reageert in de app; het bericht wordt op de slingbag voorgelezen."""
+        item = self.memory.respond(request_id, status, message)
+        if item and message:
+            def deliver():
+                if self.controller.state == "hulpgesprek":
+                    self.assistant.caretaker_message(message)
+                elif self.controller.state == "rust":
+                    name = self.config_store.get()["hulpknop"]["begeleider"].get("naam") or "Je begeleider"
+                    self.assistant.announce(f"Bericht van {name}: {message}")
+                else:
+                    # Midden in een activiteit niet onderbreken; het bericht staat in de app.
+                    self.logbook.write(self.clock.now(), "", "bericht_niet_voorgelezen", self.controller.state)
+            self.post(deliver)
+        return item
 
     def config_saved(self) -> None:
         self.audio.set_volume(self.config_store.get()["volume"])
@@ -167,6 +209,11 @@ class SlingbagService:
         warnings = []
         if not self.speech.engine.available():
             warnings.append("De spraakengine of stem ontbreekt; alleen eigen opnames werken.")
+        if self.config_store.get()["hulpknop"]["actief"]:
+            if not self.ai.available():
+                warnings.append("Hulpknop: stel de OpenRouter-sleutel in (tab Hulpknop).")
+            if not self.panel.simulated and not self.microphone.available():
+                warnings.append("Hulpknop: geen microfoon gevonden. Sluit de USB-microfoon aan.")
         if shutil.which("vcgencmd"):
             try:
                 out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,

@@ -11,3 +11,7 @@ vendor/*
 # Build en systeem
 dist/
 .DS_Store
+
+# Geheimen: nooit in de (openbare) repository
+*.key
+.env

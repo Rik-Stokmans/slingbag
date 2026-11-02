@@ -3,7 +3,9 @@
 [![tests](https://github.com/Rik-Stokmans/slingbag/actions/workflows/tests.yml/badge.svg?branch=testing)](https://github.com/Rik-Stokmans/slingbag/actions/workflows/tests.yml)
 [![release](https://img.shields.io/github/v/release/Rik-Stokmans/slingbag?label=release)](https://github.com/Rik-Stokmans/slingbag/releases/latest)
 
-Software voor het slingbag-prototype: een activiteitenhulp voor mensen met dementie. De slingbag nodigt op vaste momenten uit tot een dagelijkse activiteit, zoals koffiezetten, en begeleidt die stap voor stap met gesproken aanwijzingen. De gebruiker antwoordt met vier gekleurde knoppen. De begeleider stelt alles in via een web-app op de telefoon die de Pi zelf aanbiedt.
+Software voor het slingbag-prototype: een activiteitenhulp met hulpknop voor mensen met dementie. De slingbag nodigt op vaste momenten uit tot een dagelijkse activiteit, zoals koffiezetten, en begeleidt die stap voor stap met gesproken aanwijzingen. De gebruiker antwoordt met vier gekleurde knoppen. De begeleider stelt alles in via een web-app op de telefoon die de Pi zelf aanbiedt.
+
+Daarnaast is de blauwe knop een **hulpknop**: in rust start hij een gesproken gesprek met een AI-assistent die rekening houdt met dementie, onthoudt wat belangrijk is en zo nodig de begeleider inschakelt (zie [Hulpknop met AI](#hulpknop-met-ai)).
 
 Het prototype draait op een Raspberry Pi 3B met een breadboard, vier knoppen, een statuslampje en een actieve speaker. De spraak is offline (Piper, Nederlandse stemmen) en kan per tekst vervangen worden door een eigen opname. Dit is een studentenproject van Fontys Hogescholen.
 
@@ -33,6 +35,13 @@ Hetzelfde commando werkt de software later bij naar de nieuwste release.
 | `slingbag/config.py` | Instellingenopslag en controle | FR-07, FR-09, TR-07, TR-10 |
 | `slingbag/logbook.py` | Interactielogboek (CSV) | testen per requirement |
 | `slingbag/api.py` | Web-API (HTTP/JSON) | FR-07, TR-07 |
+| `slingbag/assistent.py` | Hulpknop-assistent: gespreksverloop, knoppen, tools, terugval naar een mens | hulpknop |
+| `slingbag/prompts.py` | Systeemprompt (dementie, veiligheid, escalatie), tools en geheugenprompt | hulpknop |
+| `slingbag/openrouter.py` | AI-koppeling: spraak naar tekst, gesprek, tekst naar spraak; alleen aanbieders zonder opslag | hulpknop |
+| `slingbag/microfoon.py` | USB-microfoon en eindedetectie (wanneer is de gebruiker klaar met praten) | hulpknop |
+| `slingbag/stem.py` | Stem van de assistent (zin voor zin) en geluidjes | hulpknop |
+| `slingbag/geheugen.py` | Herinneringen, hulpvragen en optionele gesprekken, alleen op de Pi | hulpknop |
+| `slingbag/begeleider.py` | Bereikbaarheid van de begeleider en optionele pushmelding | hulpknop |
 | `web/` | Begeleidersapp (web-app voor de telefoon) | FR-07 |
 | `vendor/` | Piper-engine (Linux arm64) en drie Nederlandse stemmen; niet in de repository, `deploy/download-vendor.sh` haalt ze op en controleert ze met `SHA256SUMS` | FR-01, FR-08 |
 | `install.sh` | Installatie vanaf de nieuwste release | — |
@@ -52,7 +61,8 @@ Hetzelfde commando werkt de software later bij naar de nieuwste release.
 | Weerstand 330 Ω (220–470 Ω mag) | 1 | voor de LED; de knoppen hebben geen weerstand nodig |
 | Jumperdraden male-female | 6 | van de Pi-header naar het breadboard |
 | Jumperdraden male-male | ±8 | op het breadboard |
-| Actieve speaker met 3,5mm-jack | 1 | met eigen versterker; gevoed via USB of eigen accu |
+| Actieve speaker met 3,5mm-jack | 1 | met eigen versterker; gevoed via USB of eigen accu (een aux-speakerset werkt ook) |
+| USB-microfoon | 1 | voor de hulpknop; de Pi 3B heeft zelf geen microfooningang |
 | Ethernetkabel (RJ45) | 1 | alleen nodig als de Pi niet via wifi bereikbaar is |
 
 ## Aansluiten
@@ -68,6 +78,7 @@ Zet de Pi **uit** voordat je iets aansluit. Pinnummers zijn de fysieke pinnen op
 | Statuslampje | GPIO24 | 18 | 330 Ω → lange poot LED (anode); korte poot (kathode) → GND-rail |
 | GND | — | 9 (of 6, 14, 20) | blauwe min-rail van het breadboard |
 | Speaker | — | 3,5mm-jack | aux-kabel; speaker heeft eigen voeding |
+| Microfoon | — | USB-poort | wordt vanzelf gevonden (eerste opname-ingang) |
 
 Plaats elke knop over de middengleuf van het breadboard en gebruik twee **diagonaal tegenover elkaar liggende** pootjes. Dan zit je altijd over het schakelende contact. De software zet de interne pull-up aan: de pin staat hoog tot de knop hem met GND verbindt.
 
@@ -108,6 +119,58 @@ Beide manieren voeren `deploy/install-pi.sh` uit. Dat installeert de pakketten (
 - De app zet de klok van de Pi gelijk met de telefoon als die meer dan een minuut afwijkt (de Pi 3B heeft geen klokbatterij).
 - Uitzetten: knop in de app, of groen + rood samen 5 seconden vasthouden. Wacht 20 seconden voordat je de stroom loskoppelt.
 
+## Hulpknop met AI
+
+Druk in rust op **blauw**. De slingbag speelt een helder *ping*-geluid (verbonden), begroet de gebruiker en luistert. Het gesprek voelt als een spraakassistent: de gebruiker praat gewoon, een kort tikje laat horen dat het is gehoord, en het antwoord begint al terwijl de AI nog verder denkt. Daarna luistert de slingbag weer. Bij een langere stilte vraagt hij één keer of de gebruiker er nog is en sluit hij daarna rustig af.
+
+| Knop tijdens het gesprek | Betekenis |
+| --- | --- |
+| Blauw of groen | Nu wil ik praten (onderbreekt de stem), of: ik ben klaar met praten |
+| Groen zonder iets te zeggen | Ja |
+| Geel | Herhaal het laatste antwoord |
+| Rood | Stop het gesprek |
+
+Het statuslampje brandt tijdens luisteren en spreken en pulseert tijdens het nadenken.
+
+**Wat de assistent doet.** De systeemprompt (`slingbag/prompts.py`) legt uit dat de gebruiker dementie heeft: korte zinnen, één vraag en één stap tegelijk, geduldig herhalen zonder "zoals ik al zei", niet overhoren, ingaan op het gevoel bij verwarring of onrust, en nooit feiten of beloftes verzinnen. Hij helpt bij taken stap voor stap, kan een ingestelde activiteit van de slingbag starten en kent de dag, de tijd, de planning, het profiel en de herinneringen.
+
+**Wanneer een mens nodig is.** Bij gevaar (val, pijn op de borst, brand- of gaslucht, verdacht bezoek), medicijnen, geld, sterke onrust, als de gebruiker om een mens vraagt of als de AI niet verder komt, roept het model `verbind_met_begeleider` aan. De hulpvraag verschijnt direct in de app (rode balk, trillen) en eventueel als pushmelding. De assistent zegt eerlijk of de begeleider nu bereikbaar is en wanneer wel, en noemt bij gevaar het noodplan (standaard: bel 112). De begeleider kan in de app reageren met *Ik kom eraan*, *Ik bel je zo* of een eigen bericht; de slingbag leest dat voor. Werkt de AI niet (geen internet, geen sleutel, geen microfoon), dan maakt de slingbag zelf een hulpvraag aan en zegt dat eerlijk.
+
+**Instellen** (tab *Hulpknop* in de app):
+
+1. Sluit de USB-microfoon aan.
+2. Vul de OpenRouter-sleutel in en druk op *Test verbinding*. De sleutel staat daarna alleen in `~/slingbag-data/geheim/openrouter.key` op de Pi en wordt nooit teruggestuurd naar de app.
+3. Vul in *Over de gebruiker* de naam, aanspreekvorm (je/u), wat de assistent moet weten en het noodplan in.
+4. Vul de begeleider in met bereikbare tijden. Wil je meldingen buiten de deur: installeer de app *ntfy*, abonneer je op een lang, moeilijk te raden onderwerp en vul dat in.
+5. Druk op *Opslaan* en daarna op *Laat horen op de slingbag*.
+
+Sleutel meteen meegeven bij het installeren kan ook: `SLINGBAG_OPENROUTER_KEY=sk-or-... ./deploy/deploy.sh`.
+
+**Privacy.** Alles wat bewaard wordt, staat op de Pi:
+
+| Gegeven | Waar | Hoe lang |
+| --- | --- | --- |
+| Opname van de stem | alleen in het werkgeheugen | tot de spraakherkenning klaar is; nooit op de kaart |
+| Gesproken antwoorden | `/dev/shm` (werkgeheugen) | tot het einde van het gesprek |
+| Herinneringen | `~/slingbag-data/hulp/herinneringen.json` | tot de begeleider ze wist (maximaal 150) |
+| Hulpvragen | `~/slingbag-data/hulp/hulpvragen.json` | laatste 100 |
+| Volledige gesprekken | `~/slingbag-data/hulp/gesprekken/` | alleen als *Gesprekken tonen en bewaren* aan staat; standaard 7 dagen |
+| Logboek | `logboek.csv` | alleen tijdstip, duur en soort gebeurtenis, geen inhoud |
+
+Voor de verwerking gaan de opname, het gesprek en het antwoord wel via internet naar OpenRouter en de aanbieder van het model. Elk verzoek vraagt OpenRouter om alleen aanbieders te gebruiken met *zero data retention* (`zdr`) die niet met de gegevens trainen (`data_collection: deny`). Zet in je OpenRouter-account onder *Settings → Privacy* ook het bewaren van prompts uit. Wie helemaal niets naar buiten wil sturen, kan de stem op *Piper* zetten; spraakherkenning en het gesprek zelf hebben dan nog steeds internet nodig.
+
+**Modellen** (aanpasbaar onder *Geavanceerd*; gekozen op snelheid en kwaliteit bij een test op 2 november 2026):
+
+| Taak | Model | Gemeten |
+| --- | --- | --- |
+| Spraak naar tekst | `mistralai/voxtral-mini-transcribe-3-0` | ±0,6 s voor een zin |
+| Gesprek | `anthropic/claude-sonnet-5.5`, nadenken op *laag* | eerste woorden na ±1 s |
+| Stem | `google/gemini-3.8-flash-lite-tts`, stem *Achird*, snelheid 0,9 | ±1,2 s per zin |
+
+Na het einde van een zin duurt het zo ongeveer 3 seconden tot de slingbag begint te praten.
+
+**Wat het niet is.** Geen alarmknop of noodvoorziening: de slingbag belt zelf geen 112 en zonder internet is er geen gesprek. Bereikbaarheid van de begeleider wordt alleen beloofd als die in de app bereikbaar staat, en ook dan alleen als bericht, niet als verbinding. Of mensen met dementie dit begrijpen en prettig vinden, moeten we nog testen.
+
 ## Ontwikkelen en testen
 
 ```sh
@@ -116,7 +179,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m slingbag --simulatie --poort 8080  # open http://localhost:8080
 ```
 
-In de simulatie komen knopdrukken uit het testpaneel van de app en speelt de computer het geluid af (macOS: `afplay`). Voor spraak in de simulatie haal je eerst de stemmen op met `./deploy/download-vendor.sh`.
+In de simulatie komen knopdrukken uit het testpaneel van de app en speelt de computer het geluid af (macOS: `afplay`). De hulpknop test je zonder microfoon met `--microfoon geen`: typ in de tab *Hulpknop* wat de gebruiker zegt. Geef de sleutel mee met `OPENROUTER_API_KEY=sk-or-... .venv/bin/python -m slingbag --simulatie --microfoon geen`. Met `SLINGBAG_DEBUG_STREAM=1` zie je het antwoord van het model binnenkomen; `journalctl -u slingbag -f` toont op de Pi per beurt hoe lang elk onderdeel duurt. Voor spraak in de simulatie haal je eerst de stemmen op met `./deploy/download-vendor.sh`.
 
 ## Branches, versies en releases
 
@@ -159,6 +222,9 @@ curl -fsSL https://github.com/Rik-Stokmans/slingbag/releases/latest/download/ins
 | Knop reageert niet | Controleer of de twee gebruikte pootjes diagonaal liggen en of de GND-rail met pin 9 is verbonden. Logboek: `journalctl -u slingbag -f`. |
 | Melding te lage spanning | Gebruik een voeding of powerbank van minstens 2,5 A en een korte, dikke USB-kabel. |
 | Lampje knippert snel | Instellingen of audio onvolledig: zie de foutmelding in de app (tab *Nu*). |
+| Blauw doet niets in rust | Hulpknop staat uit (tab *Hulpknop*). |
+| Hulpknop hoort niets | `arecord -l` moet de USB-microfoon tonen. Opnameniveau: `alsamixer` → F6 → microfoon → F4. Praat hij te vroeg terug, verhoog dan *Na zoveel seconden stilte*. |
+| "Ik kan je nu niet goed helpen" | Geen internet, geen sleutel of geen tegoed. *Test verbinding* in de app laat zien welke. |
 
 ## Externe onderdelen
 
