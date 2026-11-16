@@ -211,6 +211,22 @@
         <label class="switch"><input id="knopuitleg" type="checkbox"> Knoppen uitleggen bij uitnodiging en eerste stap</label>
       </div>
       <div class="card">
+        <h2>Speaker</h2>
+        <label>Geluid via
+          <select id="speaker-soort">
+            <option value="aux">3,5mm-aansluiting</option>
+            <option value="bluetooth">Bluetoothspeaker</option>
+          </select>
+        </label>
+        <p id="bt-status" class="muted small"></p>
+        <div id="bt-blok">
+          <button id="bt-zoeken" class="small">Bluetoothspeaker zoeken</button>
+          <p class="muted small">Zet de speaker eerst in koppelmodus: houd de bluetoothknop ingedrukt tot het lampje knippert. Zoeken duurt ongeveer 15 seconden.</p>
+          <div id="bt-lijst"></div>
+          <label class="switch"><input id="bt-wakker" type="checkbox"> Speaker wakker houden (af en toe een onhoorbaar signaal, zodat hij niet vanzelf uitgaat)</label>
+        </div>
+      </div>
+      <div class="card">
         <h2>Wachttijden</h2>
         <label>Wachten op antwoord (seconden)<input id="t-antwoord" type="number" min="10" max="600"></label>
         <label>Later vragen na (minuten)<input id="t-uitstel" type="number" min="1" max="240"></label>

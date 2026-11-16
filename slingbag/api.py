@@ -11,6 +11,7 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
+from .bluetooth import MAC
 from .config import ONLINE_STEMMEN, ConfigError
 from .geheugen import SOORTEN
 from .openrouter import AIUnavailable
@@ -99,6 +100,30 @@ def create_app(service) -> Flask:
             return error("Wacht tot de huidige sessie klaar is.", 409)
         service.audio.play([path])
         return jsonify({"ok": True})
+
+    # --- bluetoothspeaker ---------------------------------------------------------------
+
+    @app.get("/api/bluetooth")
+    def bluetooth_status():
+        return jsonify(service.bluetooth_status())
+
+    @app.post("/api/bluetooth/zoeken")
+    def bluetooth_scan():
+        control = service.audio.bluetooth.control
+        if not control.available():
+            return error("Bluetooth is niet geïnstalleerd op de slingbag. Werk de software bij.", 422)
+        return jsonify(control.scan())
+
+    @app.post("/api/bluetooth/koppelen")
+    def bluetooth_pair():
+        data = request.get_json(silent=True) or {}
+        address = str(data.get("adres", "")).upper()
+        if not MAC.match(address):
+            return error("Ongeldig bluetoothadres.")
+        ok, message = service.bluetooth_pair(address, str(data.get("naam", "")))
+        if not ok:
+            return error(message, 422)
+        return jsonify({"ok": True, "melding": message, "speaker": service.config_store.get()["speaker"]})
 
     @app.post("/api/knop/<color>")
     def button(color: str):

@@ -126,6 +126,7 @@ async function refreshStatus() {
     $("#voorbereiding").textContent = !s.spraakengine ? "alleen opnames"
       : p.bezig ? `voorbereiden ${p.klaar}/${p.totaal}` : p.fout ? "fout bij voorbereiden" : "gereed";
     $("#versie").textContent = `Softwareversie ${s.versie}`;
+    if (s.speaker) renderSpeakerStatus(s.speaker);
     if (s.hulp) updateHelpStatus(s.hulp);
   } catch {
     $("#verbinding").textContent = "geen verbinding";
@@ -301,6 +302,65 @@ function renderSettings(voices) {
     });
     return h("label", {}, h("span", { class: "small muted" }, key.replace(/_/g, " ")), area);
   }));
+}
+
+// --- speaker (3,5mm of bluetooth) ---
+
+function renderSpeaker() {
+  const sp = config.speaker;
+  $("#speaker-soort").value = sp.soort;
+  $("#bt-wakker").checked = sp.wakker_houden;
+  $("#bt-blok").classList.toggle("hidden", sp.soort !== "bluetooth");
+}
+
+function renderSpeakerStatus(live) {
+  const sp = config?.speaker;
+  if (!sp) return;
+  let text = "";
+  if (sp.soort === "bluetooth") {
+    if (!sp.adres) text = "Nog geen speaker gekoppeld.";
+    else if (live.soort !== "bluetooth") text = `${sp.naam || sp.adres} · sla op om te gebruiken`;
+    else text = `${sp.naam || sp.adres} · ${live.verbonden ? "verbonden" : "niet verbonden"}`;
+  }
+  $("#bt-status").textContent = text;
+}
+
+$("#speaker-soort").addEventListener("change", (e) => { config.speaker.soort = e.target.value; renderSpeaker(); markDirty(); });
+$("#bt-wakker").addEventListener("change", (e) => { config.speaker.wakker_houden = e.target.checked; markDirty(); });
+$("#bt-zoeken").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  $("#bt-lijst").replaceChildren(h("p", { class: "muted small" }, "Zoeken…"));
+  try {
+    const found = await api("/api/bluetooth/zoeken", { method: "POST" });
+    $("#bt-lijst").replaceChildren(...(found.length ? found.map((d) => h("div", { class: "item-tools" },
+      h("span", {}, d.naam), h("span", { class: "muted small" }, d.adres),
+      h("button", { class: "small", onclick: (ev) => pairSpeaker(d, ev.target) }, "Koppel")))
+      : [h("p", { class: "muted small" }, "Niets gevonden. Staat de speaker in koppelmodus?")]));
+  } catch (err) {
+    $("#bt-lijst").replaceChildren();
+    toast(err.message, true);
+  }
+  e.target.disabled = false;
+});
+
+async function pairSpeaker(device, button) {
+  button.disabled = true;
+  button.textContent = "Koppelen…";
+  try {
+    const res = await api("/api/bluetooth/koppelen", { method: "POST", json: device });
+    // Gekoppeld en meteen opgeslagen op de slingbag; overige openstaande wijzigingen blijven staan.
+    savedConfig.speaker = structuredClone(res.speaker);
+    config.speaker = structuredClone(res.speaker);
+    $("#bt-lijst").replaceChildren();
+    renderSpeaker();
+    markDirty();
+    toast(`${res.speaker.naam} gekoppeld. Het geluid gaat nu via deze speaker.`);
+    refreshStatus();
+  } catch (err) {
+    toast(err.message, true);
+    button.disabled = false;
+    button.textContent = "Koppel";
+  }
 }
 
 $("#volume").addEventListener("input", (e) => { config.volume = +e.target.value; $("#volume-waarde").textContent = `${config.volume}%`; markDirty(); });
@@ -599,6 +659,7 @@ async function init(fetchConfig = true) {
   if (!voices.includes(config.stem)) voices.unshift(config.stem);
   renderAll();
   renderSettings(voices);
+  renderSpeaker();
   await renderHelpSettings();
   markDirty();
 }
