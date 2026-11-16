@@ -215,6 +215,16 @@ class SlingbagService:
         self.audio.bluetooth.connected = True  # zojuist verbonden; de bewaking houdt dit daarna bij
         return True, message
 
+    def bluetooth_forget(self, address: str) -> None:
+        """Vergeet een apparaat; was het de gekozen speaker, dan terug naar de 3,5mm-uitgang."""
+        self.audio.bluetooth.control.remove(address)
+        config = self.config_store.get()
+        if config["speaker"]["adres"] == address:
+            config["speaker"].update({"soort": "aux", "adres": "", "naam": ""})
+            self.config_store.save(config)
+            self.config_saved()
+        self.logbook.write(self.clock.now(), "", "bluetooth_vergeten", self.controller.state, detail=address)
+
     # --- status ----------------------------------------------------------------------
 
     def status(self) -> dict:
