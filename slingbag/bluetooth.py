@@ -158,6 +158,69 @@ class BluetoothControl:
             proc.kill()
         return found
 
+    BINARY = "bluetoothctl"
+    PAIR_DONE = re.compile(r"Pairing successful|Failed to pair|AlreadyExists|Paired: yes")
+
+    def pair_with_agent(self, address: str, timeout: float = 40) -> str:
+        """Koppelt in één bluetoothctl-sessie mét koppelagent.
+
+        Zonder agent staat de Pi op 'Pairable: no' en loopt koppelen vast. De agent
+        (NoInputNoOutput) keurt het koppelen goed; vraagt de speaker toch om
+        bevestiging of toestemming, dan antwoordt deze sessie 'yes'.
+        """
+        try:
+            proc = subprocess.Popen([self.BINARY], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, bufsize=0)
+        except OSError as exc:
+            return f"Failed to pair: {exc}"
+        chunks: queue.Queue = queue.Queue()
+
+        def reader():
+            while True:
+                try:
+                    data = os.read(proc.stdout.fileno(), 4096)
+                except OSError:
+                    data = b""
+                chunks.put(data)
+                if not data:
+                    return
+
+        threading.Thread(target=reader, name="bluetoothctl", daemon=True).start()
+
+        def send(line: str) -> None:
+            try:
+                proc.stdin.write((line + "\n").encode())
+            except OSError:
+                pass
+
+        for line in ("agent NoInputNoOutput", "default-agent", "pairable on", f"pair {address}"):
+            send(line)
+        output = ""
+        answered = 0
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data = chunks.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if not data:
+                break
+            output += clean(data.decode(errors="replace"))
+            prompts = len(re.findall(r"\(yes/no\)", output))
+            while answered < prompts:  # bevestiging of toestemming vragen: altijd ja
+                send("yes")
+                answered += 1
+            if self.PAIR_DONE.search(output):
+                time.sleep(1)  # sleutels laten wegschrijven
+                break
+        send("quit")
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        return output
+
     def remove(self, address: str) -> None:
         self._run("remove", address, timeout=10)
 
@@ -187,15 +250,15 @@ class BluetoothControl:
             if not self._find(address):
                 return False, ("Speaker niet gevonden. Zet hem in koppelmodus (bluetoothknop ingedrukt "
                                "houden tot het lampje knippert) en probeer het opnieuw.")
-            out = self._run("--timeout", "25", "pair", address, timeout=30)
+            out = self.pair_with_agent(address)
             if not self.info(address)["gekoppeld"]:
-                log.warning("Koppelen mislukt: %s", clean(out).strip()[-300:])
+                log.warning("Koppelen mislukt:%s", self._reason(out) or " " + out.strip()[-300:])
                 return False, ("Koppelen lukte niet. Zet de speaker in koppelmodus en probeer het opnieuw."
                                + self._reason(out))
         self._run("trust", address, timeout=5)
         out = self._run("--timeout", "10", "connect", address, timeout=15)
         if not self.connected(address):
-            log.warning("Verbinden mislukt: %s", clean(out).strip()[-300:])
+            log.warning("Verbinden mislukt:%s", self._reason(out) or " " + clean(out).strip()[-300:])
             return False, ("Gekoppeld, maar verbinden lukte niet. Staat de speaker aan? Lukt het daarna nog "
                            "niet, tik dan op Vergeet en koppel opnieuw." + self._reason(out))
         return True, "Verbonden."
