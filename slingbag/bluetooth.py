@@ -29,7 +29,8 @@ from typing import Callable
 log = logging.getLogger(__name__)
 
 MAC = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
-_DEVICE_LINE = re.compile(r"^Device ([0-9A-F]{2}(?::[0-9A-F]{2}){5}) (.+)$", re.MULTILINE)
+_DEVICE_LINE = re.compile(r"Device ([0-9A-F]{2}(?::[0-9A-F]{2}){5}) ([^\r\n]*)")
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x01|\x02")
 _UNNAMED = re.compile(r"^[0-9A-F]{2}(-[0-9A-F]{2}){5}$")
 
 RATE = 44100
@@ -64,19 +65,30 @@ def volume_gain(volume: int) -> float:
     return round((max(0, min(100, volume)) / 100) ** 3, 4)
 
 
+def clean(output: str) -> str:
+    """Haalt kleurcodes en prompts van ``bluetoothctl`` weg."""
+    return _ANSI.sub("", output or "")
+
+
 def parse_devices(output: str) -> list[dict]:
-    """``bluetoothctl devices`` → [{adres, naam}], apparaten zonder naam weggelaten."""
-    found = {}
-    for address, name in _DEVICE_LINE.findall(output):
+    """``bluetoothctl devices`` → [{adres, naam}]. Apparaten zonder naam krijgen een lege naam."""
+    found: dict[str, str] = {}
+    for address, name in _DEVICE_LINE.findall(clean(output)):
         name = name.strip()
-        if name and not _UNNAMED.match(name):
+        if _UNNAMED.match(name) or name.replace("-", ":") == address:
+            name = ""
+        if name or address not in found:
             found[address] = name
-    return [{"adres": a, "naam": n} for a, n in sorted(found.items(), key=lambda item: item[1].lower())]
+    # Met naam eerst (alfabetisch), daarna de naamloze.
+    return [{"adres": a, "naam": n}
+            for a, n in sorted(found.items(), key=lambda item: (not item[1], item[1].lower(), item[0]))]
 
 
 def parse_info(output: str) -> dict:
     """``bluetoothctl info <adres>`` → naam en status (gekoppeld, vertrouwd, verbonden)."""
-    info = {"naam": "", "gekoppeld": False, "vertrouwd": False, "verbonden": False}
+    output = clean(output)
+    known = bool(re.search(r"^Device [0-9A-F:]{17}", output, re.MULTILINE)) and "not available" not in output
+    info = {"naam": "", "bekend": known, "gekoppeld": False, "vertrouwd": False, "verbonden": False}
     keys = {"Paired": "gekoppeld", "Trusted": "vertrouwd", "Connected": "verbonden"}
     for line in output.splitlines():
         key, _, value = line.strip().partition(": ")
@@ -113,7 +125,48 @@ class BluetoothControl:
     def scan(self, seconds: int = 12) -> list[dict]:
         self.power_on()
         self._run("--timeout", str(seconds), "scan", "on", timeout=seconds + 5)
-        return parse_devices(self._run("devices", timeout=5))
+        return self.devices()
+
+    def devices(self) -> list[dict]:
+        """Alle apparaten die de Pi kent: gevonden bij zoeken of eerder gekoppeld, met hun status."""
+        paired = {d["adres"] for d in parse_devices(self._run("devices", "Paired", timeout=5))}
+        connected = {d["adres"] for d in parse_devices(self._run("devices", "Connected", timeout=5))}
+        result = [dict(d, gekoppeld=d["adres"] in paired, verbonden=d["adres"] in connected)
+                  for d in parse_devices(self._run("devices", timeout=5))]
+        # Verbonden en gekoppelde apparaten bovenaan; volgorde verder zoals parse_devices.
+        result.sort(key=lambda d: (not d["verbonden"], not d["gekoppeld"]))
+        return result
+
+    def _find(self, address: str, seconds: int = 20) -> bool:
+        """Zoekt kort tot het apparaat er is. BlueZ vergeet een gevonden apparaat ~30 s na het zoeken."""
+        if self.info(address)["bekend"]:
+            return True
+        try:
+            proc = subprocess.Popen(["bluetoothctl", "--timeout", str(seconds), "scan", "on"],
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return False
+        found = False
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline and not found:
+            time.sleep(1)
+            found = self.info(address)["bekend"]
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return found
+
+    def remove(self, address: str) -> None:
+        self._run("remove", address, timeout=10)
+
+    @staticmethod
+    def _reason(output: str) -> str:
+        """Laatste foutregel van bluetoothctl, voor in de melding."""
+        lines = [line.strip() for line in clean(output).splitlines()
+                 if re.search(r"fail|error|not available|rejected|timeout", line, re.IGNORECASE)]
+        return f" (melding: {lines[-1][:160]})" if lines else ""
 
     def info(self, address: str) -> dict:
         return parse_info(self._run("info", address, timeout=5))
@@ -131,13 +184,20 @@ class BluetoothControl:
             return False, "Bluetooth is niet geïnstalleerd op de slingbag. Werk de software bij."
         self.power_on()
         if not self.info(address)["gekoppeld"]:
-            self._run("--timeout", "25", "pair", address, timeout=30)
+            if not self._find(address):
+                return False, ("Speaker niet gevonden. Zet hem in koppelmodus (bluetoothknop ingedrukt "
+                               "houden tot het lampje knippert) en probeer het opnieuw.")
+            out = self._run("--timeout", "25", "pair", address, timeout=30)
             if not self.info(address)["gekoppeld"]:
-                return False, ("Koppelen lukte niet. Zet de speaker in koppelmodus (bluetoothknop "
-                               "ingedrukt houden tot het lampje knippert) en probeer het opnieuw.")
+                log.warning("Koppelen mislukt: %s", clean(out).strip()[-300:])
+                return False, ("Koppelen lukte niet. Zet de speaker in koppelmodus en probeer het opnieuw."
+                               + self._reason(out))
         self._run("trust", address, timeout=5)
-        if not self.connect(address):
-            return False, "Gekoppeld, maar nog niet verbonden. Zet de speaker aan en probeer het opnieuw."
+        out = self._run("--timeout", "10", "connect", address, timeout=15)
+        if not self.connected(address):
+            log.warning("Verbinden mislukt: %s", clean(out).strip()[-300:])
+            return False, ("Gekoppeld, maar verbinden lukte niet. Staat de speaker aan? Lukt het daarna nog "
+                           "niet, tik dan op Vergeet en koppel opnieuw." + self._reason(out))
         return True, "Verbonden."
 
 

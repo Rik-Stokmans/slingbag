@@ -107,6 +107,19 @@ def create_app(service) -> Flask:
     def bluetooth_status():
         return jsonify(service.bluetooth_status())
 
+    @app.get("/api/bluetooth/apparaten")
+    def bluetooth_devices():
+        control = service.audio.bluetooth.control
+        return jsonify(control.devices() if control.available() else [])
+
+    @app.post("/api/bluetooth/vergeten")
+    def bluetooth_forget():
+        address = str((request.get_json(silent=True) or {}).get("adres", "")).upper()
+        if not MAC.match(address):
+            return error("Ongeldig bluetoothadres.")
+        service.bluetooth_forget(address)
+        return jsonify({"ok": True, "speaker": service.config_store.get()["speaker"]})
+
     @app.post("/api/bluetooth/zoeken")
     def bluetooth_scan():
         control = service.audio.bluetooth.control

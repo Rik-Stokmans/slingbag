@@ -16,17 +16,39 @@ from slingbag.config import DEFAULT_CONFIG, validate
 JBL = "AA:BB:CC:DD:EE:01"
 
 
-def test_devices_are_parsed_sorted_and_unnamed_ones_skipped():
-    out = (f"Device {JBL} JBL Go 4\n"
+def test_all_devices_are_listed_named_first_with_colour_codes_removed():
+    out = (f"\x1b[0;94m[bluetooth]\x1b[0m# Device {JBL} JBL Go 4\r\n"
            "Device 11:22:33:44:55:66 11-22-33-44-55-66\n"
-           "Device 77:88:99:AA:BB:CC Anke's iPhone\n")
+           "[\x1b[0;92mNEW\x1b[0m] Device 77:88:99:AA:BB:CC Anke's iPhone\n")
     assert parse_devices(out) == [{"adres": "77:88:99:AA:BB:CC", "naam": "Anke's iPhone"},
-                                  {"adres": JBL, "naam": "JBL Go 4"}]
+                                  {"adres": JBL, "naam": "JBL Go 4"},
+                                  {"adres": "11:22:33:44:55:66", "naam": ""}]
 
 
 def test_info_is_parsed():
     out = f"Device {JBL} (public)\n\tName: JBL Go 4\n\tPaired: yes\n\tTrusted: no\n\tConnected: yes\n"
-    assert parse_info(out) == {"naam": "JBL Go 4", "gekoppeld": True, "vertrouwd": False, "verbonden": True}
+    assert parse_info(out) == {"naam": "JBL Go 4", "bekend": True, "gekoppeld": True,
+                               "vertrouwd": False, "verbonden": True}
+    assert parse_info(f"Device {JBL} not available\n")["bekend"] is False
+
+
+def test_device_list_marks_paired_and_connected(monkeypatch):
+    other = "11:22:33:44:55:66"
+    answers = {("devices",): f"Device {other} Telefoon\nDevice {JBL} JBL Go 4\n",
+               ("devices", "Paired"): f"Device {JBL} JBL Go 4\n",
+               ("devices", "Connected"): ""}
+    control = bluetooth.BluetoothControl()
+    monkeypatch.setattr(control, "_run", lambda *args, timeout=10: answers[args])
+    assert control.devices() == [
+        {"adres": JBL, "naam": "JBL Go 4", "gekoppeld": True, "verbonden": False},
+        {"adres": other, "naam": "Telefoon", "gekoppeld": False, "verbonden": False},
+    ]
+
+
+def test_failure_reason_is_shown():
+    out = "Attempting to pair with AA\n\x1b[0;91mFailed to pair: org.bluez.Error.AuthenticationFailed\x1b[0m\n"
+    assert "AuthenticationFailed" in bluetooth.BluetoothControl._reason(out)
+    assert bluetooth.BluetoothControl._reason("Pairing successful") == ""
 
 
 def test_speaker_settings_are_validated():
