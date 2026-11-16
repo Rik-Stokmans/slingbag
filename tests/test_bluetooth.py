@@ -1,6 +1,7 @@
 """Tests voor de bluetoothspeaker: zonder bluetooth, bluez-alsa of ffmpeg (nep-onderdelen)."""
 
 import copy
+import sys
 import subprocess
 import threading
 import time
@@ -216,3 +217,36 @@ def test_audio_player_switches_between_aux_and_bluetooth():
     assert fake.played == [["a.wav"]] and tokens == ["t1"]
     player.set_output({"soort": "aux", "adres": JBL, "wakker_houden": True})
     assert player.output == "aux" and fake.address == ""
+
+
+FAKE_BLUETOOTHCTL = r'''#!/usr/bin/env python3
+import sys
+log = open(sys.argv[1], "a")
+for line in sys.stdin:
+    line = line.strip()
+    log.write(line + "\n"); log.flush()
+    if line.startswith("pair "):
+        print("Attempting to pair with " + line[5:], flush=True)
+        sys.stdout.write("[agent] Confirm passkey 123456 (yes/no): "); sys.stdout.flush()
+    elif line == "yes":
+        print("\x1b[0;93m[CHG]\x1b[0m Device AA:BB:CC:DD:EE:01 Paired: yes", flush=True)
+        print("Pairing successful", flush=True)
+    elif line == "quit":
+        break
+'''
+
+
+def test_pairing_uses_an_agent_and_answers_confirmation(tmp_path, monkeypatch):
+    script = tmp_path / "fake_bluetoothctl.py"
+    script.write_text(FAKE_BLUETOOTHCTL)
+    log = tmp_path / "commands.txt"
+    wrapper = tmp_path / "bluetoothctl"
+    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "{log}"\n')
+    wrapper.chmod(0o755)
+    control = bluetooth.BluetoothControl()
+    monkeypatch.setattr(control, "BINARY", str(wrapper))
+    out = control.pair_with_agent(JBL, timeout=10)
+    assert "Pairing successful" in out
+    commands = log.read_text().splitlines()
+    assert commands[:4] == ["agent NoInputNoOutput", "default-agent", "pairable on", f"pair {JBL}"]
+    assert "yes" in commands and commands[-1] == "quit"
