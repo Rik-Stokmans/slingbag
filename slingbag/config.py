@@ -17,6 +17,8 @@ DEFAULT_CONFIG = {
     "stem": "nl_NL-pim-medium",
     "knopuitleg": True,
     "aandachtsgeluid": True,
+    # Uitgang: "aux" = 3,5mm-aansluiting, "bluetooth" = gekoppelde bluetoothspeaker (zie bluetooth.py).
+    "speaker": {"soort": "aux", "adres": "", "naam": "", "wakker_houden": True},
     "tijden": {
         "antwoord_wachttijd_s": 60,
         "uitstel_min": 15,
@@ -80,6 +82,7 @@ ONLINE_STEMMEN = ["Achird", "Sulafat", "Kore", "Aoede", "Leda", "Charon", "Orus"
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _TOPIC = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_MAC = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 _MODEL = re.compile(r"^[a-z0-9~][a-z0-9._~:/-]{2,99}$")
 _LIMITS = {
     "antwoord_wachttijd_s": (10, 600),
@@ -179,8 +182,26 @@ def validate(config: dict) -> list[str]:
             errors.append(f"{where}: kies minstens één dag.")
         if not isinstance(entry.get("actief"), bool):
             errors.append(f"{where}: 'actief' moet aan of uit zijn.")
+    _validate_speaker(config.get("speaker"), errors)
     _validate_help(config.get("hulpknop"), errors)
     return errors
+
+
+def _validate_speaker(speaker, errors: list[str]) -> None:
+    if not isinstance(speaker, dict):
+        errors.append("Instellingen van de speaker ontbreken.")
+        return
+    if speaker.get("soort") not in ("aux", "bluetooth"):
+        errors.append("Speaker: kies de 3,5mm-aansluiting of bluetooth.")
+    address = speaker.get("adres")
+    if not isinstance(address, str) or (address and not _MAC.match(address)):
+        errors.append("Speaker: ongeldig bluetoothadres.")
+    elif speaker.get("soort") == "bluetooth" and not address:
+        errors.append("Speaker: koppel eerst een bluetoothspeaker (knop Zoeken).")
+    if not isinstance(speaker.get("naam"), str) or len(speaker["naam"]) > 80:
+        errors.append("Speaker: naam moet tekst zijn van hooguit 80 tekens.")
+    if not isinstance(speaker.get("wakker_houden"), bool):
+        errors.append("Speaker: 'wakker houden' moet aan of uit zijn.")
 
 
 def _validate_help(help_cfg, errors: list[str]) -> None:

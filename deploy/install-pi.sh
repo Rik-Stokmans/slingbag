@@ -64,6 +64,26 @@ elif [ ! -s "$DATA_DIR/geheim/openrouter.key" ]; then
   echo "Nog geen OpenRouter-sleutel: stel hem in via de app (tab Hulpknop)."
 fi
 
+step "Bluetooth voor een draadloze speaker"
+# BlueZ voor koppelen, bluez-alsa voor geluid via ALSA (apparaat 'bluealsa'). Pakketnamen per pakket,
+# zodat één ontbrekend pakket de rest niet tegenhoudt.
+for pkg in bluez bluez-alsa-utils libasound2-plugin-bluez; do
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" \
+    || echo "LET OP: pakket $pkg niet gevonden; bluetoothgeluid werkt dan mogelijk niet."
+done
+sudo usermod -aG bluetooth "$SERVICE_USER" 2>/dev/null || true
+sudo rfkill unblock bluetooth || true
+sudo systemctl enable --now bluetooth >/dev/null 2>&1 || true
+for unit in bluealsa bluealsad; do
+  if systemctl list-unit-files "$unit.service" 2>/dev/null | grep -q "^$unit.service"; then
+    sudo systemctl enable --now "$unit.service" >/dev/null 2>&1 || true
+  fi
+done
+if command -v wireplumber >/dev/null || command -v pulseaudio >/dev/null; then
+  echo "LET OP: PipeWire of PulseAudio gevonden (desktopversie). Gebruik Raspberry Pi OS Lite voor bluetoothgeluid."
+fi
+bluetoothctl power on >/dev/null 2>&1 || true
+
 step "Wifi: eigen netwerk '$HOTSPOT_SSID' als terugvaloptie"
 sudo raspi-config nonint do_wifi_country NL || true
 sudo rfkill unblock wifi || true

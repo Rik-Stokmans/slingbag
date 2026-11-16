@@ -78,6 +78,7 @@ class SlingbagService:
     # --- levenscyclus ------------------------------------------------------------
 
     def start(self) -> None:
+        self.audio.set_output(self.config_store.get()["speaker"])
         self.audio.set_volume(self.config_store.get()["volume"])
         self.prepare_speech()
         self.memory.purge_conversations(self.config_store.get()["hulpknop"]["bewaartermijn_dagen"])
@@ -87,7 +88,7 @@ class SlingbagService:
     def close(self) -> None:
         self._stopping.set()
         self.assistant.stop("afsluiten")
-        self.audio.stop()
+        self.audio.close()
         self.voice.close()
         self.panel.close()
 
@@ -157,6 +158,7 @@ class SlingbagService:
         return item
 
     def config_saved(self) -> None:
+        self.audio.set_output(self.config_store.get()["speaker"])
         self.audio.set_volume(self.config_store.get()["volume"])
         self.prepare_speech()
         self.post(self.controller.clear_error)
@@ -185,6 +187,34 @@ class SlingbagService:
             self.logbook.write(self.clock.now(), "", "klok_gelijkgezet", self.controller.state)
         return result.returncode == 0
 
+    # --- bluetoothspeaker ----------------------------------------------------------------
+
+    def bluetooth_status(self) -> dict:
+        speaker = self.config_store.get()["speaker"]
+        return {
+            "beschikbaar": self.audio.bluetooth.control.available(),
+            "soort": speaker["soort"],
+            "naam": speaker["naam"],
+            "adres": speaker["adres"],
+            "verbonden": self.audio.output == "bluetooth" and self.audio.bluetooth.connected,
+        }
+
+    def bluetooth_pair(self, address: str, name: str) -> tuple[bool, str]:
+        """Koppelt een speaker en zet de uitgang meteen op bluetooth."""
+        ok, message = self.audio.bluetooth.control.pair(address)
+        if not ok:
+            return False, message
+        info = self.audio.bluetooth.control.info(address)
+        config = self.config_store.get()
+        config["speaker"].update({"soort": "bluetooth", "adres": address,
+                                  "naam": (info["naam"] or name or address)[:80]})
+        self.config_store.save(config)
+        self.logbook.write(self.clock.now(), "", "speaker_gekoppeld", self.controller.state,
+                           detail=config["speaker"]["naam"])
+        self.config_saved()
+        self.audio.bluetooth.connected = True  # zojuist verbonden; de bewaking houdt dit daarna bij
+        return True, message
+
     # --- status ----------------------------------------------------------------------
 
     def status(self) -> dict:
@@ -201,6 +231,8 @@ class SlingbagService:
             "voorbereiding": self.speech.progress(),
             "spraakengine": self.speech.engine.available(),
             "simulatie": self.panel.simulated,
+            "speaker": {"soort": self.audio.output, "naam": config["speaker"]["naam"],
+                        "verbonden": self.audio.bluetooth.connected},
             "waarschuwingen": self._warnings(),
         })
         return snapshot
@@ -209,6 +241,10 @@ class SlingbagService:
         warnings = []
         if not self.speech.engine.available():
             warnings.append("De spraakengine of stem ontbreekt; alleen eigen opnames werken.")
+        if self.audio.output == "bluetooth" and not self.audio.bluetooth.connected:
+            name = self.config_store.get()["speaker"]["naam"] or "De bluetoothspeaker"
+            warnings.append(f"{name} is niet verbonden. Zet de speaker aan; de slingbag maakt zelf "
+                            "weer verbinding (binnen een halve minuut).")
         if self.config_store.get()["hulpknop"]["actief"]:
             if not self.ai.available():
                 warnings.append("Hulpknop: stel de OpenRouter-sleutel in (tab Hulpknop).")

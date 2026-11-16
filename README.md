@@ -7,7 +7,7 @@ Software voor het slingbag-prototype: een activiteitenhulp met hulpknop voor men
 
 Daarnaast is de blauwe knop een **hulpknop**: in rust start hij een gesproken gesprek met een AI-assistent die rekening houdt met dementie, onthoudt wat belangrijk is en zo nodig de begeleider inschakelt (zie [Hulpknop met AI](#hulpknop-met-ai)).
 
-Het prototype draait op een Raspberry Pi 3B met een breadboard, vier knoppen, een statuslampje en een actieve speaker. De spraak is offline (Piper, Nederlandse stemmen) en kan per tekst vervangen worden door een eigen opname. Dit is een studentenproject van Fontys Hogescholen.
+Het prototype draait op een Raspberry Pi 3B met een breadboard, vier knoppen, een statuslampje en een speaker: een actieve speaker op de 3,5mm-uitgang of een bluetoothspeaker. De spraak is offline (Piper, Nederlandse stemmen) en kan per tekst vervangen worden door een eigen opname. Dit is een studentenproject van Fontys Hogescholen.
 
 **Nieuwste versie:** [laatste release](https://github.com/Rik-Stokmans/slingbag/releases/latest)
 
@@ -30,7 +30,8 @@ Hetzelfde commando werkt de software later bij naar de nieuwste release.
 | `slingbag/interaction.py` | Interactiecontroller (toestandsmachine) | FR-02–FR-06, FR-09, TR-05 |
 | `slingbag/scheduler.py` | Planner | FR-02, TR-06 |
 | `slingbag/hardware.py` | Knoppen- en lampadapter (GPIO) | TR-04 |
-| `slingbag/audio.py` | Audiospeler (ALSA, 3,5mm) | FR-01, FR-06, TR-03 |
+| `slingbag/audio.py` | Audiospeler (ALSA, 3,5mm of bluetooth) | FR-01, FR-06, TR-03 |
+| `slingbag/bluetooth.py` | Bluetoothspeaker: koppelen, verbinding bewaken, doorlopende geluidsstroom | FR-01, TR-03 |
 | `slingbag/speech.py` | Spraakbibliotheek (Piper + eigen opnames) | FR-01, FR-07, TR-02 |
 | `slingbag/config.py` | Instellingenopslag en controle | FR-07, FR-09, TR-07, TR-10 |
 | `slingbag/logbook.py` | Interactielogboek (CSV) | testen per requirement |
@@ -61,7 +62,7 @@ Hetzelfde commando werkt de software later bij naar de nieuwste release.
 | Weerstand 330 Ω (220–470 Ω mag) | 1 | voor de LED; de knoppen hebben geen weerstand nodig |
 | Jumperdraden male-female | 6 | van de Pi-header naar het breadboard |
 | Jumperdraden male-male | ±8 | op het breadboard |
-| Actieve speaker met 3,5mm-jack | 1 | met eigen versterker; gevoed via USB of eigen accu (een aux-speakerset werkt ook) |
+| Actieve speaker met 3,5mm-jack **of** bluetoothspeaker | 1 | 3,5mm: met eigen versterker, gevoed via USB of eigen accu (een aux-speakerset werkt ook). Bluetooth: bijvoorbeeld een JBL Go 4; koppelen via de app |
 | USB-microfoon | 1 | voor de hulpknop; de Pi 3B heeft zelf geen microfooningang |
 | Ethernetkabel (RJ45) | 1 | alleen nodig als de Pi niet via wifi bereikbaar is |
 
@@ -77,7 +78,7 @@ Zet de Pi **uit** voordat je iets aansluit. Pinnummers zijn de fysieke pinnen op
 | Knop rood (nee / stop) | GPIO23 | 16 | andere poot knop → GND-rail |
 | Statuslampje | GPIO24 | 18 | 330 Ω → lange poot LED (anode); korte poot (kathode) → GND-rail |
 | GND | — | 9 (of 6, 14, 20) | blauwe min-rail van het breadboard |
-| Speaker | — | 3,5mm-jack | aux-kabel; speaker heeft eigen voeding |
+| Speaker | — | 3,5mm-jack of bluetooth | aux-kabel (speaker heeft eigen voeding) of draadloos, zie [Bluetoothspeaker](#bluetoothspeaker) |
 | Microfoon | — | USB-poort | wordt vanzelf gevonden (eerste opname-ingang) |
 
 Plaats elke knop over de middengleuf van het breadboard en gebruik twee **diagonaal tegenover elkaar liggende** pootjes. Dan zit je altijd over het schakelende contact. De software zet de interne pull-up aan: de pin staat hoog tot de knop hem met GND verbindt.
@@ -118,6 +119,23 @@ Beide manieren voeren `deploy/install-pi.sh` uit. Dat installeert de pakketten (
 - Eigen opname: neem eerst op met *Dictafoon*/*Recorder* en kies het bestand via **🎙 Opname**. Opnemen in de browser zelf vereist HTTPS en werkt daarom niet in dit lokale netwerk.
 - De app zet de klok van de Pi gelijk met de telefoon als die meer dan een minuut afwijkt (de Pi 3B heeft geen klokbatterij).
 - Uitzetten: knop in de app, of groen + rood samen 5 seconden vasthouden. Wacht 20 seconden voordat je de stroom loskoppelt.
+
+## Bluetoothspeaker
+
+1. Zet de speaker in koppelmodus (bij een JBL: bluetoothknop ingedrukt houden tot het lampje knippert).
+2. App → *Instellingen → Speaker* → *Geluid via: Bluetoothspeaker* → **Bluetoothspeaker zoeken**.
+3. Tik bij de speaker op **Koppel**. Het geluid gaat daarna meteen via de speaker; dit is direct opgeslagen.
+4. Terug naar de 3,5mm-uitgang: *Geluid via: 3,5mm-aansluiting* en **Opslaan**. De koppeling blijft bewaard.
+
+Wat de software doet:
+
+- **Geen weggevallen eerste woord:** vóór het eerste geluid gaat 0,8 s stilte over de verbinding, en tussen zinnen blijft de verbinding open (tot 20 s na het laatste geluid).
+- **Opnieuw verbinden:** is de speaker uit of buiten bereik, dan probeert de slingbag elke 30 seconden opnieuw en vlak voor elk geluid. De app (tab *Nu*) waarschuwt zolang hij niet verbonden is.
+- **Wakker houden** (standaard aan): elke 4 minuten zonder geluid een onhoorbaar zacht signaal, zodat de speaker zichzelf niet uitschakelt. Of dit genoeg is, verschilt per speaker: test het.
+- **Volume:** de schuif in de app werkt ook voor bluetooth. Zet de speaker zelf op een vaste, ruime stand.
+- **Hulpknop:** pas als het geluid echt uit is, gaat de microfoon luisteren. Bluetooth heeft wat vertraging; daar is rekening mee gehouden.
+
+Werkt alleen op Raspberry Pi OS **Lite** (bluez-alsa). De installatie zet bluetooth zelf klaar. Op de Pi 3B delen wifi en bluetooth één antenne; hapert het geluid, houd de speaker dan dicht bij de Pi.
 
 ## Hulpknop met AI
 
@@ -219,6 +237,8 @@ curl -fsSL https://github.com/Rik-Stokmans/slingbag/releases/latest/download/ins
 | --- | --- |
 | `slingbag.local` niet gevonden | Wacht 2 minuten na opstarten; controleer kabel en `ping slingbag.local`. Het IP-adres staat ook in je router. |
 | Geen geluid | Speaker aan en volume omhoog? `ssh rik@slingbag.local 'aplay -l'` moet *Headphones* tonen. Test via *Instellingen → Laat horen*. |
+| Geen geluid via bluetooth | Speaker aan en verbonden (tab *Nu* toont anders een waarschuwing)? `bluetoothctl info <adres>` moet *Connected: yes* tonen. Logboek: `journalctl -u slingbag -f`. Koppel eventueel opnieuw via *Instellingen → Speaker*. |
+| Bluetoothspeaker niet gevonden bij zoeken | Staat hij in koppelmodus en niet verbonden met een telefoon? Zet bluetooth op de telefoon even uit. |
 | Knop reageert niet | Controleer of de twee gebruikte pootjes diagonaal liggen en of de GND-rail met pin 9 is verbonden. Logboek: `journalctl -u slingbag -f`. |
 | Melding te lage spanning | Gebruik een voeding of powerbank van minstens 2,5 A en een korte, dikke USB-kabel. |
 | Lampje knippert snel | Instellingen of audio onvolledig: zie de foutmelding in de app (tab *Nu*). |

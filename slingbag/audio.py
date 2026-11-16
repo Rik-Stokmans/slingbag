@@ -1,4 +1,4 @@
-"""Audiospeler: speelt WAV-bestanden af via de 3,5mm-uitgang en kan altijd worden onderbroken (FR-06, TR-03)."""
+"""Audiospeler: speelt WAV-bestanden af via de 3,5mm-uitgang of een bluetoothspeaker en kan altijd worden onderbroken (FR-06, TR-03)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Callable
+
+from .bluetooth import BluetoothSpeaker, volume_gain
 
 log = logging.getLogger(__name__)
 
@@ -21,18 +23,36 @@ class AudioPlayer:
     """
 
     def __init__(self, device: str = "plughw:CARD=Headphones,DEV=0",
-                 mixer_card: str = "Headphones", mixer_control: str = "PCM"):
+                 mixer_card: str = "Headphones", mixer_control: str = "PCM",
+                 bluetooth: BluetoothSpeaker | None = None):
         self.device = device
         self.mixer_card = mixer_card
         self.mixer_control = mixer_control
         self.is_mac = platform.system() == "Darwin"
         self.volume = 70
+        self.output = "aux"  # "aux" (3,5mm) of "bluetooth"
+        self.bluetooth = bluetooth or BluetoothSpeaker()
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._generation = 0
 
+    def set_output(self, speaker: dict) -> None:
+        """Kiest de uitgang uit de instellingen: ``{"soort": "aux"|"bluetooth", "adres": ...}``."""
+        address = speaker.get("adres", "") if speaker.get("soort") == "bluetooth" else ""
+        if self.is_mac:
+            address = ""  # op de Mac speelt alles via afplay
+        output = "bluetooth" if address else "aux"
+        if output != self.output:
+            self.stop()
+        self.output = output
+        self.bluetooth.configure(address, keep_awake=bool(speaker.get("wakker_houden", True)))
+        self.set_volume(self.volume)
+
     def set_volume(self, volume: int) -> None:
         self.volume = max(0, min(100, int(volume)))
+        self.bluetooth.gain = volume_gain(self.volume)
+        if self.output == "bluetooth":
+            return  # het volume zit dan in de geluidsstroom zelf
         if self.is_mac or shutil.which("amixer") is None:
             return  # op de Mac regelt afplay het volume per bestand
         result = subprocess.run(
@@ -51,6 +71,9 @@ class AudioPlayer:
              on_done: Callable[[object], None] | None = None) -> None:
         """Stopt wat er speelt en begint direct met de nieuwe reeks."""
         self.stop()
+        if self.output == "bluetooth":
+            self.bluetooth.play(paths, (lambda: on_done(token)) if on_done else None)
+            return
         with self._lock:
             self._generation += 1
             generation = self._generation
@@ -81,6 +104,7 @@ class AudioPlayer:
         threading.Thread(target=run, name="audio", daemon=True).start()
 
     def stop(self) -> None:
+        self.bluetooth.stop()
         with self._lock:
             self._generation += 1
             proc, self._proc = self._proc, None
@@ -93,5 +117,11 @@ class AudioPlayer:
 
     @property
     def playing(self) -> bool:
+        if self.bluetooth.playing:
+            return True
         with self._lock:
             return self._proc is not None and self._proc.poll() is None
+
+    def close(self) -> None:
+        self.stop()
+        self.bluetooth.close()
