@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from . import taal
 from .begeleider import DAGNAMEN, caretaker_name, describe_moment, is_available, next_available
 
 MAANDEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus",
@@ -147,9 +148,33 @@ def part_of_day(moment: datetime) -> str:
     return "ochtend" if 6 <= hour < 12 else "middag" if 12 <= hour < 18 else "avond" if 18 <= hour < 24 else "nacht"
 
 
-def greeting(settings: dict, moment: datetime) -> str:
+NOODPLAN_EN = ("Call 112 in case of immediate danger, such as a fall where you cannot get up, "
+               "chest pain or fire.")
+
+ENGLISH = """\
+# LANGUAGE: ENGLISH
+The user speaks English. These instructions are written in Dutch, but you must ALWAYS speak and write
+in clear, simple, spoken English, in every turn, even if a tool result, a memory or a message from the
+caregiver is in Dutch: translate it naturally. Write times as you would say them in English
+("half past ten", "quarter past three"). Ignore the Dutch je/u distinction; just be warm and polite.
+"""
+
+
+def emergency_plan(settings: dict, lang: str = "nl") -> str:
+    """Het noodplan; in het Engels vervangt een Engelse tekst het Nederlandse standaardplan."""
+    plan = (settings["gebruiker"].get("noodplan") or "").strip()
+    if lang == "en" and (not plan or plan.startswith("Bel 112 bij direct gevaar")):
+        return NOODPLAN_EN
+    return plan or "Bel 112 bij direct gevaar."
+
+
+def greeting(settings: dict, moment: datetime, lang: str = "nl") -> str:
     """Vaste begroeting, zodat de gebruiker direct na het verbindingsgeluid iets hoort."""
     name = settings["gebruiker"].get("naam", "").strip()
+    if lang == "en":
+        hello = {"ochtend": "Good morning", "middag": "Good afternoon", "avond": "Good evening",
+                 "nacht": "Hello"}[part_of_day(moment)]
+        return f"{hello}{' ' + name if name else ''}, I'm here. How can I help you?"
     hello = {"ochtend": "Goedemorgen", "middag": "Goedemiddag", "avond": "Goedenavond", "nacht": "Hallo"}[
         part_of_day(moment)]
     if settings["gebruiker"].get("aanspreekvorm") == "u":
@@ -177,6 +202,10 @@ def system_prompt(config: dict, memories: list[dict], open_requests: list[dict],
     name = caretaker_name(settings)
     form = "u" if user.get("aanspreekvorm") == "u" else "je"
     guidelines = GUIDELINES.format(aanspreekvorm=f'"{form}"', begeleider=name)
+    lang = taal.taal(config)
+    if lang == "en":
+        guidelines = ENGLISH + "\n" + guidelines.replace("Gewone spreektaal in het Nederlands",
+                                                         "Gewone spreektaal in het Engels")
 
     available = is_available(settings, moment)
     if available:
@@ -191,7 +220,8 @@ def system_prompt(config: dict, memories: list[dict], open_requests: list[dict],
         profile.append(f"Wat de begeleider over de gebruiker vertelt:\n{user['over'].strip()}")
     caretaker_line = name + (f" ({caretaker['relatie']})" if caretaker.get("relatie") else "")
 
-    activities = "\n".join(f"- id {a['id']}: {a['naam']}" for a in config.get("activiteiten", [])) or "- geen"
+    activities = "\n".join(f"- id {a['id']}: {taal.activiteit(a, lang)['naam']}"
+                           for a in config.get("activiteiten", [])) or "- geen"
     today = moment.date().isoformat()
     requests = "\n".join(
         f"- om {r['tijdstip'][11:16]}: {r['reden']}"
@@ -209,7 +239,7 @@ def system_prompt(config: dict, memories: list[dict], open_requests: list[dict],
 {caretaker_line}. {reach}
 
 # Noodplan
-{user.get('noodplan') or 'Bel 112 bij direct gevaar.'}
+{emergency_plan(settings, lang)}
 
 # Nu
 Het is {spoken_date(moment)}, {moment:%H:%M} uur ({part_of_day(moment)}).
@@ -220,7 +250,7 @@ Geplande activiteiten vandaag: {', '.join(upcoming) if upcoming else 'geen'}.
 
 # Eerdere hulpvragen van vandaag
 {_requests_block(requests, name)}
-"""
+""" + (f"\n{ENGLISH}" if lang == "en" else "")
 
 
 def _requests_block(requests: str, name: str) -> str:

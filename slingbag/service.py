@@ -24,6 +24,7 @@ from .begeleider import Notifier
 from .config import ConfigStore
 from .geheugen import MemoryStore
 from .hardware import create_panel
+from . import taal
 from .interaction import InteractionController, SystemClock, session_items
 from .logbook import Logbook
 from .microfoon import Microphone
@@ -64,7 +65,7 @@ class SlingbagService:
         self.ai = OpenRouterClient(self.keys, help_settings)
         self.memory = MemoryStore(self.data_dir, self.clock)
         self.voice = Voice(self.ai, self.speech, self.audio, help_settings,
-                           lambda: self.config_store.get()["stem"], self.data_dir / "cache" / "hulp")
+                           lambda: taal.stem(self.config_store.get()), self.data_dir / "cache" / "hulp")
         self.microphone = Microphone(microphone)
         self.notifier = Notifier(help_settings)
         self.assistant = HelpAssistant(
@@ -129,7 +130,7 @@ class SlingbagService:
     def prepare_speech(self) -> None:
         """Genereert vooraf alle spraak en ruimt verouderde spraakbestanden op."""
         config = self.config_store.get()
-        voice = config["stem"]
+        voice = taal.stem(config)
         items = []
         for activity in config["activiteiten"]:
             items.extend(session_items(config, activity))

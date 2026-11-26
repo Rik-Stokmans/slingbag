@@ -25,9 +25,36 @@ DEFAULT_TEXTS = {
 }
 
 
-def render(texts: dict, key: str, **values) -> str:
-    """Geeft de ingevulde tekst voor ``key``; eigen teksten gaan voor standaardteksten."""
-    template = texts.get(key) or DEFAULT_TEXTS[key]
+DEFAULT_TEXTS_EN = {
+    "knoppen_uitnodiging": "Press green to start. Yellow is later. "
+                           "Blue is start with help. Red is no.",
+    "keuze_hulp": "Do you want to do it yourself, or do you want help with the steps? "
+                  "Green is do it yourself. Blue is help.",
+    "zelfstandig": "Great. If you want help after all, press blue. "
+                   "When you are done, press green.",
+    "knoppen_stap": "Green is the next step. Yellow is repeat. "
+                    "Blue is pause. Red is stop.",
+    "pauze": "Let's take a short break. Press blue when you want to continue.",
+    "hervat": "Let's continue.",
+    "laatste_stap": "That was the last step.",
+    "afronden_vraag": "Are you done with {activiteit}? Green is yes. "
+                      "Blue is not yet, then I will help you further.",
+    "uitstel": "Okay, I will ask you again in {minuten} minutes.",
+    "weigering": "That's fine. We will do it another time.",
+    "stop": "I will stop now. See you later.",
+    "afgerond": "Well done!",
+}
+
+
+def render(texts: dict, key: str, lang: str = "nl", **values) -> str:
+    """Geeft de ingevulde tekst voor ``key``; eigen teksten gaan voor standaardteksten.
+
+    Eigen teksten zijn Nederlands; in het Engels gelden altijd de Engelse standaardzinnen.
+    """
+    if lang == "en":
+        template = DEFAULT_TEXTS_EN[key]
+    else:
+        template = texts.get(key) or DEFAULT_TEXTS[key]
     try:
         return template.format(**values)
     except (KeyError, IndexError, ValueError):

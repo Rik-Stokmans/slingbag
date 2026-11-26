@@ -24,7 +24,7 @@ import time
 from datetime import datetime
 from typing import Callable
 
-from . import prompts
+from . import prompts, taal
 from .begeleider import caretaker_name, describe_moment, is_available, next_available
 from .microfoon import Endpointer
 from .openrouter import AIUnavailable
@@ -232,7 +232,28 @@ class HelpAssistant:
             return "er is geen microfoon gevonden"
         return None
 
+    def _en(self) -> bool:
+        return taal.is_engels(self.config)
+
+    def _caretaker_spoken(self) -> str:
+        name = caretaker_name(self.settings)
+        if self._en() and name == "je begeleider":
+            return "your caregiver"
+        return name
+
     def _phrase(self, key: str) -> str:
+        if self._en():
+            name = self._caretaker_spoken()
+            return {
+                "stop": "I will end our conversation now. See you later.",
+                "niet_verstaan": "Sorry, I didn't quite catch that. Could you say it again?",
+                "nog_daar": "I'm still listening. Take your time.",
+                "stil_einde": "I don't hear anything anymore. Press the blue button when you need me again. "
+                              "See you later.",
+                "lang": "We have been talking for a while. I will stop now. Press blue when you need me again.",
+                "storing": "I can't think properly right now.",
+                "bericht": f"{name[0].upper() + name[1:]} says:",
+            }[key]
         formal = self.settings["gebruiker"].get("aanspreekvorm") == "u"
         name = caretaker_name(self.settings)
         phrases = {
@@ -253,7 +274,7 @@ class HelpAssistant:
     def _conversation(self) -> str:
         settings = self.settings
         now = self.clock.now()
-        hello = prompts.greeting(settings, now)
+        hello = prompts.greeting(settings, now, taal.taal(self.config))
         self._set_phase(SPREKEN)
         self.last_answer = self.voice.say(hello, cache=True, interrupted=self._interrupted)
         self._skip.clear()
@@ -313,7 +334,7 @@ class HelpAssistant:
         return [{"role": "system", "content": [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]}]
 
     def _activity_name(self, activity_id: str) -> str:
-        activity = self.config_store.activity(activity_id)
+        activity = taal.activiteit(self.config_store.activity(activity_id), taal.taal(self.config))
         return activity["naam"] if activity else activity_id
 
     def _add_turn(self, role: str, text: str) -> None:
@@ -378,12 +399,12 @@ class HelpAssistant:
             if turn.status == "afgebroken":
                 return self._typed.get() if turn.reason == "tekst" else None
         if turn.status == "stilte":
-            return "Ja." if self._green else None
+            return ("Yes." if self._en() else "Ja.") if self._green else None
 
         self._set_phase(DENKEN)
         self.voice.sound("gehoord")
         try:
-            return self.client.transcribe(turn.wav)
+            return self.client.transcribe(turn.wav, language="en" if self._en() else "nl")
         except AIUnavailable as exc:
             self.last_error = str(exc)
             raise
@@ -490,8 +511,10 @@ class HelpAssistant:
             self._next_activity = activity["id"]
             self._log("hulp_activiteit", activity["id"])
             if not spoke:
-                self.voice.say(f"Goed. We gaan samen {activity['naam']}. Luister naar de eerste stap.",
-                               interrupted=self._stop.is_set)
+                local = taal.activiteit(activity, taal.taal(self.config))
+                text = (f"Okay. Let's do {local['naam']} together. Listen to the first step." if self._en()
+                        else f"Goed. We gaan samen {activity['naam']}. Luister naar de eerste stap.")
+                self.voice.say(text, interrupted=self._stop.is_set)
             return {"ok": True}, True, False
         if name == "gesprek_beeindigen":
             return {"ok": True}, True, False
@@ -524,7 +547,7 @@ class HelpAssistant:
             result["wat_je_kunt_zeggen"] = (
                 f"{name} is nu niet bereikbaar. Het bericht staat klaar en {name} ziet het later.")
         if urgent:
-            result["noodplan"] = settings["gebruiker"].get("noodplan") or "Bel 112 bij direct gevaar."
+            result["noodplan"] = prompts.emergency_plan(settings, taal.taal(self.config))
         return result
 
     def _fallback_to_human(self, problem: str, in_conversation: bool = False) -> None:
@@ -537,6 +560,18 @@ class HelpAssistant:
         pushed = self.notifier.send(False) if available else False
         self._log("hulp_terugval", f"{problem}; {'bereikbaar' if available else 'niet bereikbaar'}; "
                                    f"push {'ja' if pushed else 'nee'}")
+        if self._en():
+            lead = self._phrase("storing") if in_conversation else "I can't help you properly right now."
+            spoken = self._caretaker_spoken()
+            if available:
+                text = f"{lead} I have sent {spoken} a message."
+            else:
+                text = f"{lead} {spoken[0].upper() + spoken[1:]} is not available right now."
+            text += f" {prompts.emergency_plan(settings, 'en')}"
+            self._set_phase(SPREKEN)
+            self._add_turn("assistent", text)
+            self.voice.say(text, interrupted=self._stop.is_set)
+            return
         lead = self._phrase("storing") if in_conversation else "Ik kan je nu niet goed helpen."
         if available:
             text = f"{lead} Ik heb {name} een bericht gestuurd."

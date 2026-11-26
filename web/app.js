@@ -161,13 +161,15 @@ async function preview(item, extra = {}) {
 
 // --- tekst + opname bewerken -----------------------------------------------------------
 
-function itemEditor(item, placeholder) {
+const ENGLISH_VOICE = () => config.stem_en || "en_US-lessac-medium";
+
+function itemEditor(item, placeholder, extra = {}) {
   const node = $("#tpl-item").content.firstElementChild.cloneNode(true);
   const area = $("textarea", node);
   area.value = item.tekst || "";
   area.placeholder = placeholder;
   area.addEventListener("input", () => { item.tekst = area.value; markDirty(); });
-  $(".play", node).addEventListener("click", () => preview(item));
+  $(".play", node).addEventListener("click", () => preview(item, extra));
   const rec = $(".rec", node);
   const showRec = () => {
     rec.classList.toggle("hidden", !item.opname);
@@ -220,6 +222,7 @@ function renderActivities() {
       h("button", { class: "small", onclick: () => { act.stappen.push({ tekst: "", opname: null }); changed(); } }, "+ Stap"),
       h("div", { class: "subhead" }, "Afsluiting"),
       itemEditor(act.afsluiting, defaultTexts.afgerond || "Goed gedaan!"),
+      englishEditor(act),
       h("button", {
         class: "danger wide", disabled: config.activiteiten.length === 1,
         onclick: () => {
@@ -230,6 +233,36 @@ function renderActivities() {
         },
       }, "Activiteit verwijderen")));
   });
+}
+
+// Engelse versie: wordt pas aan de activiteit toegevoegd zodra er iets is ingevuld.
+function englishEditor(act) {
+  const en = act.en || {};
+  en.naam ??= "";
+  en.uitnodiging ??= { tekst: "", opname: null };
+  en.afsluiting ??= { tekst: "", opname: null };
+  en.stappen ??= [];
+  act.stappen.forEach((_, i) => { en.stappen[i] ??= { tekst: "", opname: null }; });
+  const voice = { stem: ENGLISH_VOICE() };
+  const attach = () => { act.en = en; markDirty(); };
+  const name = h("input", { type: "text", value: en.naam, placeholder: "Name, e.g. making coffee", "aria-label": "Engelse naam" });
+  name.addEventListener("input", () => { en.naam = name.value; });
+  const steps = h("div", { class: "steps" });
+  act.stappen.forEach((step, i) => steps.append(h("div", { class: "step" },
+    itemEditor(en.stappen[i], step.tekst ? `English for: ${step.tekst}` : `Step ${i + 1}`, voice))));
+  const box = h("details", { class: "english" },
+    h("summary", { class: "subhead" }, `Engelse versie (English)${act.en?.naam ? `: ${act.en.naam}` : ""}`),
+    h("p", { class: "muted small" }, "Wordt gebruikt als de taal op English staat. Lege velden vallen terug op het Nederlands."),
+    name,
+    h("div", { class: "subhead" }, "Invitation"),
+    itemEditor(en.uitnodiging, act.uitnodiging.tekst ? `English for: ${act.uitnodiging.tekst}` : "Invitation", voice),
+    h("div", { class: "subhead" }, "Steps"),
+    steps,
+    h("div", { class: "subhead" }, "Closing"),
+    itemEditor(en.afsluiting, "Well done!", voice));
+  box.addEventListener("input", attach);
+  box.addEventListener("change", attach);
+  return box;
 }
 
 function swap(list, a, b) { [list[a], list[b]] = [list[b], list[a]]; changed(); }
@@ -288,7 +321,8 @@ const TIMES = { "t-antwoord": "antwoord_wachttijd_s", "t-uitstel": "uitstel_min"
 function renderSettings(voices) {
   $("#volume").value = config.volume;
   $("#volume-waarde").textContent = `${config.volume}%`;
-  $("#stem").replaceChildren(...voices.map((v) => h("option", { value: v, selected: v === config.stem },
+  $("#taal").value = config.taal || "nl";
+  $("#stem").replaceChildren(...voices.filter((v) => !v.startsWith("en_") || v === config.stem).map((v) => h("option", { value: v, selected: v === config.stem },
     v.replace(/^nl_NL-/, "").replace(/-medium$/, ""))));
   $("#aandachtsgeluid").checked = config.aandachtsgeluid;
   $("#knopuitleg").checked = config.knopuitleg;
@@ -395,13 +429,16 @@ async function pairSpeaker(device, button) {
 
 $("#volume").addEventListener("input", (e) => { config.volume = +e.target.value; $("#volume-waarde").textContent = `${config.volume}%`; markDirty(); });
 $("#stem").addEventListener("change", (e) => { config.stem = e.target.value; markDirty(); });
+$("#taal").addEventListener("change", (e) => { config.taal = e.target.value; markDirty(); });
 $("#aandachtsgeluid").addEventListener("change", (e) => { config.aandachtsgeluid = e.target.checked; markDirty(); });
 $("#knopuitleg").addEventListener("change", (e) => { config.knopuitleg = e.target.checked; markDirty(); });
 for (const [id, key] of Object.entries(TIMES)) {
   $(`#${id}`).addEventListener("input", (e) => { config.tijden[key] = parseInt(e.target.value, 10) || 0; markDirty(); });
 }
 $("#stem-test").addEventListener("click", () =>
-  preview({ tekst: "Hallo, ik ben de slingbag. Zo klink ik." }, { stem: config.stem, volume: config.volume }));
+  (config.taal === "en"
+    ? preview({ tekst: "Hello, I am the slingbag. This is how I sound." }, { stem: ENGLISH_VOICE(), volume: config.volume })
+    : preview({ tekst: "Hallo, ik ben de slingbag. Zo klink ik." }, { stem: config.stem, volume: config.volume })));
 $("#afsluiten").addEventListener("click", async () => {
   if (!confirm("Slingbag nu uitzetten? Wacht daarna 20 seconden voordat je de stroom loskoppelt.")) return;
   const res = await api("/api/systeem/afsluiten", { method: "POST" }).catch((e) => toast(e.message, true));

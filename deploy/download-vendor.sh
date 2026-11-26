@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Haalt de Piper-engine (Linux arm64) en de drie Nederlandse stemmen op in vendor/
+# Haalt de Piper-engine (Linux arm64), de drie Nederlandse stemmen en een Engelse stem op in vendor/
 # en controleert ze met vendor/SHA256SUMS. Bestanden die er al zijn, worden overgeslagen.
 set -euo pipefail
 
@@ -22,6 +22,9 @@ for stem in pim ronnie mls; do
   haal "voices/nl_NL-$stem-medium.onnx" "$VOICES_URL/$stem/medium/nl_NL-$stem-medium.onnx"
   haal "voices/nl_NL-$stem-medium.onnx.json" "$VOICES_URL/$stem/medium/nl_NL-$stem-medium.onnx.json"
 done
+EN_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium"
+haal "voices/en_US-lessac-medium.onnx" "$EN_URL/en_US-lessac-medium.onnx"
+haal "voices/en_US-lessac-medium.onnx.json" "$EN_URL/en_US-lessac-medium.onnx.json"
 
 echo "==> Controlesommen"
 SUMS="$(cd "$(dirname "$0")/.." && pwd)/vendor/SHA256SUMS"

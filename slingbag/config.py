@@ -15,6 +15,9 @@ DEFAULT_CONFIG = {
     "versie": 1,
     "volume": 70,
     "stem": "nl_NL-pim-medium",
+    # Taal van alles wat de slingbag zegt: "nl" of "en" (zie taal.py). De app zelf blijft Nederlands.
+    "taal": "nl",
+    "stem_en": "en_US-lessac-medium",
     "knopuitleg": True,
     "aandachtsgeluid": True,
     # Uitgang: "aux" = 3,5mm-aansluiting, "bluetooth" = gekoppelde bluetoothspeaker (zie bluetooth.py).
@@ -110,6 +113,26 @@ def _check_item(item, where: str, errors: list[str], required: bool = True) -> N
         errors.append(f"{where}: ongeldige verwijzing naar opname.")
 
 
+def _check_english(en, name: str, errors: list[str]) -> None:
+    """De Engelse versie van een activiteit is optioneel; lege velden vallen terug op het Nederlands."""
+    if en is None:
+        return
+    if not isinstance(en, dict):
+        errors.append(f"{name}: Engelse versie is ongeldig.")
+        return
+    if not isinstance(en.get("naam", ""), str):
+        errors.append(f"{name}: Engelse naam moet tekst zijn.")
+    for key in ("uitnodiging", "afsluiting"):
+        if en.get(key) is not None:
+            _check_item(en[key], f"{name}, Engelse {key}", errors, required=False)
+    steps = en.get("stappen", [])
+    if not isinstance(steps, list):
+        errors.append(f"{name}: Engelse stappen moeten een lijst zijn.")
+        return
+    for n, step in enumerate(steps, start=1):
+        _check_item(step, f"{name}, Engelse stap {n}", errors, required=False)
+
+
 def validate(config: dict) -> list[str]:
     """Geeft een lijst met begrijpelijke fouten; leeg betekent geldig."""
     errors: list[str] = []
@@ -120,6 +143,10 @@ def validate(config: dict) -> list[str]:
         errors.append("Volume moet een geheel getal van 0 tot en met 100 zijn.")
     if not isinstance(config.get("stem"), str) or not config["stem"]:
         errors.append("Kies een stem.")
+    if config.get("taal", "nl") not in ("nl", "en"):
+        errors.append("Kies Nederlands of Engels als taal.")
+    if not isinstance(config.get("stem_en", ""), str):
+        errors.append("Kies een Engelse stem.")
     for key in ("knopuitleg", "aandachtsgeluid"):
         if not isinstance(config.get(key), bool):
             errors.append(f"'{key}' moet aan of uit zijn.")
@@ -163,6 +190,7 @@ def validate(config: dict) -> list[str]:
                 _check_item(step, f"{name}, stap {n}", errors)
         if act.get("afsluiting") is not None:
             _check_item(act["afsluiting"], f"{name}, afsluiting", errors, required=False)
+        _check_english(act.get("en"), name, errors)
 
     planning = config.get("planning")
     if not isinstance(planning, list):

@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 from .speech import SpeechUnavailable
+from . import taal
 from .texts import render
 
 RUST = "rust"
@@ -44,15 +45,17 @@ class SystemClock:
 def session_items(config: dict, activity: dict) -> list:
     """Alle teksten en opnames die een sessie van deze activiteit kan uitspreken."""
     texts = config.get("teksten", {})
+    lang = taal.taal(config)
+    activity = taal.activiteit(activity, lang)
     name = activity["naam"]
     minutes = config["tijden"]["uitstel_min"]
     items = [activity["uitnodiging"], *activity["stappen"],
-             activity.get("afsluiting") or render(texts, "afgerond")]
+             activity.get("afsluiting") or render(texts, "afgerond", lang)]
     for key in ("knoppen_uitnodiging", "keuze_hulp", "zelfstandig", "knoppen_stap", "pauze",
                 "hervat", "laatste_stap", "weigering", "stop", "afgerond"):
-        items.append(render(texts, key))
-    items.append(render(texts, "afronden_vraag", activiteit=name))
-    items.append(render(texts, "uitstel", minuten=minutes))
+        items.append(render(texts, key, lang))
+    items.append(render(texts, "afronden_vraag", lang, activiteit=name))
+    items.append(render(texts, "uitstel", lang, minuten=minutes))
     return [i for i in items if i and (isinstance(i, str) or i.get("tekst") or i.get("opname"))]
 
 
@@ -92,7 +95,7 @@ class InteractionController:
         return self.config_store.get()
 
     def _text(self, key: str, **values) -> str:
-        return render(self.config.get("teksten", {}), key, **values)
+        return render(self.config.get("teksten", {}), key, taal.taal(self.config), **values)
 
     def _log(self, event: str, detail: str = "") -> None:
         self.logbook.write(
@@ -120,7 +123,7 @@ class InteractionController:
         paths = [self.speech.chime_path] if chime and config.get("aandachtsgeluid") else []
         for item in items:
             try:
-                paths.append(self.speech.resolve(item, config["stem"]))
+                paths.append(self.speech.resolve(item, taal.stem(config)))
             except SpeechUnavailable as exc:
                 self._log("fout", str(exc))
         self._token = object()
@@ -168,7 +171,7 @@ class InteractionController:
             self.logbook.write(self.clock.now(), self.session, "uitnodiging_overgeslagen", self.state,
                                activity_id, "", f"bron: {source}; sessie actief")
             return False, "Er loopt al een sessie."
-        activity = self.config_store.activity(activity_id)
+        activity = taal.activiteit(self.config_store.activity(activity_id), taal.taal(self.config))
         if activity is None:
             return False, "Deze activiteit bestaat niet."
         problem = self._preflight(activity)
@@ -193,7 +196,7 @@ class InteractionController:
 
     def _preflight(self, activity: dict) -> str | None:
         """Controleert vóór de start of alle benodigde audio er is (FR-09, TR-10)."""
-        voice = self.config["stem"]
+        voice = taal.stem(self.config)
         for item in session_items(self.config, activity):
             try:
                 self.speech.resolve(item, voice)

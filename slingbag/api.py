@@ -16,6 +16,7 @@ from .config import ONLINE_STEMMEN, ConfigError
 from .geheugen import SOORTEN
 from .openrouter import AIUnavailable
 from .speech import SpeechUnavailable
+from . import taal
 from .texts import DEFAULT_TEXTS
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -89,7 +90,7 @@ def create_app(service) -> Flask:
         data = request.get_json(silent=True) or {}
         config = service.config_store.get()
         item = {"tekst": data.get("tekst", ""), "opname": data.get("opname")}
-        voice = data.get("stem") or config["stem"]
+        voice = data.get("stem") or taal.stem(config)
         if "volume" in data:
             service.audio.set_volume(int(data["volume"]))
         try:
@@ -213,8 +214,12 @@ def create_app(service) -> Flask:
     def voice_test():
         if service.controller.state != "rust":
             return error("Wacht tot de huidige sessie klaar is.", 409)
-        name = service.config_store.get()["hulpknop"]["gebruiker"].get("naam") or ""
-        text = f"Hallo{' ' + name if name else ''}, zo klink ik als je op de blauwe knop drukt."
+        config = service.config_store.get()
+        name = config["hulpknop"]["gebruiker"].get("naam") or ""
+        if taal.is_engels(config):
+            text = f"Hello{' ' + name if name else ''}, this is how I sound when you press the blue button."
+        else:
+            text = f"Hallo{' ' + name if name else ''}, zo klink ik als je op de blauwe knop drukt."
         service.assistant.announce(text)
         return jsonify({"ok": True, "stem": service.voice.mode()})
 
